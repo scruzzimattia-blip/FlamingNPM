@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,8 +25,11 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.Println("FlamingNPM WAF wird gestartet...")
 
-	backendURL := getEnv("BACKEND_URL", "http://nginx-proxy-manager:81")
-	listenAddr := getEnv("LISTEN_ADDR", ":8080")
+	backendURL := getEnv("BACKEND_URL", "")
+	httpAddr := getEnv("HTTP_ADDR", ":80")
+	httpsAddr := getEnv("HTTPS_ADDR", ":443")
+	tlsCertFile := getEnv("TLS_CERT_FILE", "")
+	tlsKeyFile := getEnv("TLS_KEY_FILE", "")
 	apiAddr := getEnv("API_ADDR", ":8443")
 	dbPath := getEnv("DB_PATH", "/data/waf.db")
 	maxBodyStr := getEnv("MAX_BODY_SIZE", "1048576")
@@ -69,7 +73,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Dynamischer Reverse-Proxy initialisieren fehlgeschlagen: %v", err)
 	}
-	log.Printf("Standard-Upstream (ohne Host-Regel): %s", backendURL)
+	if dynamicRouter.DefaultBackendURL() != "" {
+		log.Printf("Standard-Upstream (ohne Host-Regel): %s", dynamicRouter.DefaultBackendURL())
+	} else {
+		log.Printf("Kein Standard-Upstream konfiguriert (ohne Host-Regel -> 404)")
+	}
 
 	apiRouter := mux.NewRouter()
 	handler := api.NewHandler(db, engine, hub, dynamicRouter)
@@ -84,12 +92,23 @@ func main() {
 		AllowCredentials: true,
 	}).Handler(apiRouter)
 
-	proxyServer := &http.Server{
-		Addr:         listenAddr,
+	httpProxyServer := &http.Server{
+		Addr:         httpAddr,
 		Handler:      dynamicRouter,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
+	}
+
+	httpsProxyServer := &http.Server{
+		Addr:         httpsAddr,
+		Handler:      dynamicRouter,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
 	}
 
 	apiServer := &http.Server{
@@ -111,9 +130,20 @@ func main() {
 	}()
 
 	go func() {
-		log.Printf("WAF-Proxy lauscht auf %s", listenAddr)
-		if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Proxy-Server Fehler: %v", err)
+		log.Printf("WAF-Proxy (HTTP) lauscht auf %s", httpAddr)
+		if err := httpProxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP-Proxy-Server Fehler: %v", err)
+		}
+	}()
+
+	go func() {
+		if tlsCertFile == "" || tlsKeyFile == "" {
+			log.Printf("WAF-Proxy (HTTPS) nicht aktiv (TLS_CERT_FILE/TLS_KEY_FILE fehlen)")
+			return
+		}
+		log.Printf("WAF-Proxy (HTTPS) lauscht auf %s", httpsAddr)
+		if err := httpsProxyServer.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTPS-Proxy-Server Fehler: %v", err)
 		}
 	}()
 
@@ -133,7 +163,8 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	proxyServer.Shutdown(ctx)
+	httpProxyServer.Shutdown(ctx)
+	httpsProxyServer.Shutdown(ctx)
 	apiServer.Shutdown(ctx)
 
 	log.Println("Server erfolgreich beendet")
