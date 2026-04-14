@@ -106,7 +106,7 @@ jobs:
 
       - name: Docker-Metadaten extrahieren
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image_name.outputs.value }}
           tags: |
