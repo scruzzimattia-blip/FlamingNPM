@@ -79,7 +79,7 @@ func (dr *DynamicRouter) ReloadRoutes() error {
 		m[hk] = runtimeRoute{
 			hostLower:  hk,
 			target:     t,
-			pathPrefix: strings.TrimSpace(r.PathPrefix),
+			pathPrefix: NormalizePathPrefix(r.PathPrefix),
 		}
 	}
 
@@ -122,15 +122,8 @@ func (dr *DynamicRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if chosen == nil {
 		chosen = dr.defaultURL
-	} else if pathPrefix != "" && strings.HasPrefix(r.URL.Path, pathPrefix) {
-		r.URL.Path = strings.TrimPrefix(r.URL.Path, pathPrefix)
-		if r.URL.Path == "" || !strings.HasPrefix(r.URL.Path, "/") {
-			if r.URL.Path == "" {
-				r.URL.Path = "/"
-			} else {
-				r.URL.Path = "/" + r.URL.Path
-			}
-		}
+	} else if pathPrefix != "" {
+		r.URL.Path = StripPathPrefixIfMatches(r.URL.Path, pathPrefix)
 	}
 
 	p := dr.reverseProxyFor(chosen)
