@@ -71,6 +71,7 @@ open http://localhost:8443
 | `MAX_BODY_SIZE` | `1048576` | Maximale Body-Groesse in Bytes (Standard: 1 MB) |
 | `RATE_LIMIT_MAX` | `100` | Max. Anfragen pro Zeitfenster |
 | `RATE_LIMIT_WINDOW` | `60` | Zeitfenster in Sekunden |
+| `WAF_SCORE_THRESHOLD` | `50` | Bedrohungs-Score ab dem blockiert wird (Summe der Regel-Gewichte) |
 
 ## Projektstruktur
 
@@ -100,7 +101,8 @@ FlamingNPM/
 │   ├── package.json
 │   └── vite.config.js
 ├── .github/workflows/
-│   └── dev-deploy.yml       # CI/CD: Build & Push auf develop
+│   ├── ci.yml               # Lint/Tests auf Feature-Branches und PRs
+│   └── release.yml          # Version, Docker-Image und Release nur auf main
 ├── Dockerfile               # Multi-Stage-Build (Node + Go + Alpine)
 ├── docker-compose.yml       # Lokale Entwicklungsumgebung
 └── README.md
@@ -124,16 +126,25 @@ FlamingNPM/
 
 ## Versionierung & CI/CD
 
-Die Versionierung startet bei `v0.0.0` (Datei `VERSION`) und wird bei jedem Push auf `develop` automatisch weitergefuehrt:
+### Feature-Branches und Pull Requests
 
-1. Falls noch kein Tag existiert, wird `v0.0.0` erstellt
-2. Sonst wird die Patch-Version automatisch erhoeht (`v0.0.1`, `v0.0.2`, ...)
-3. Pro Version wird automatisch ein GitHub Release erstellt
-4. Das Docker-Image wird mit folgenden Tags publiziert:
-   - `vX.Y.Z` (Release-Tag)
+Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml): bei jedem Push auf einen Branch **ausser** `main` sowie bei **allen** Pull Requests werden ausgefuehrt:
+
+- Go: `gofmt`-Pruefung, `go vet`, `go test` (mit CGO/SQLite)
+- Frontend: `npm install` und Produktions-Build (`vite build`)
+
+### Merge nach `main` (Release)
+
+Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml): nur bei **Push auf `main`** (z. B. nach bestaetigtem Merge eines Pull Requests):
+
+1. Go-Tests
+2. Versionierung: start bei `v0.0.0` (Datei `VERSION`), sonst automatische Patch-Erhoehung
+3. Git-Tag und GitHub Release mit Release Notes
+4. Docker-Image wird publiziert mit Tags:
+   - `vX.Y.Z`
    - `latest`
-   - `develop`
-   - `dev-<sha>`
+   - `main`
+   - `git-<sha>`
 
 ### Image abrufen
 
@@ -175,8 +186,9 @@ curl -X POST http://localhost:8443/api/rules \
 
 ### Regel-Aktionen
 
-- `block` — Anfrage blockieren (Blacklist)
-- `allow` — Anfrage explizit erlauben (Whitelist, wird vor Blacklist-Regeln geprueft)
+- `block` — Erhoeht den Bedrohungs-Score um `score_weight` (Standard 10). Block, wenn die Summe die Schwelle `WAF_SCORE_THRESHOLD` erreicht oder uebersteigt.
+- `allow` — Anfrage explizit erlauben (Whitelist, wird vor allen anderen Regeln geprueft)
+- `sanitize` — Entfernt Treffer des Regex im gewaehlten Ziel (Parameter, Body, URI, Header, all), ohne sofort zu blockieren
 
 ## Lizenz
 
