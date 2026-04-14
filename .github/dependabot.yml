@@ -1,0 +1,21 @@
+# Dependabot haelt Abhaengigkeiten aktuell (Pull Requests automatisch).
+# Aktivierung: Repo-Settings → Code security → Dependabot (sollte automatisch greifen).
+
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /web/frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

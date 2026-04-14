@@ -2,32 +2,39 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 
 	"github.com/flamingnpm/waf/internal/database"
 	"github.com/flamingnpm/waf/internal/models"
+	"github.com/flamingnpm/waf/internal/proxy"
 	"github.com/flamingnpm/waf/internal/waf"
 )
 
 // Handler buendelt alle REST-API-Endpunkte fuer das Dashboard.
 type Handler struct {
-	db     *database.DB
-	engine *waf.Engine
-	hub    *Hub
+	db      *database.DB
+	engine  *waf.Engine
+	hub     *Hub
+	dynamic *proxy.DynamicRouter
 }
 
-func NewHandler(db *database.DB, engine *waf.Engine, hub *Hub) *Handler {
-	return &Handler{db: db, engine: engine, hub: hub}
+func NewHandler(db *database.DB, engine *waf.Engine, hub *Hub, dynamic *proxy.DynamicRouter) *Handler {
+	return &Handler{db: db, engine: engine, hub: hub, dynamic: dynamic}
 }
 
 func (h *Handler) RegisterRoutes(r *mux.Router) {
 	api := r.PathPrefix("/api").Subrouter()
 
 	api.HandleFunc("/stats", h.getStats).Methods("GET")
+	api.HandleFunc("/meta", h.getMeta).Methods("GET")
 
 	api.HandleFunc("/rules", h.getRules).Methods("GET")
 	api.HandleFunc("/rules", h.createRule).Methods("POST")
@@ -41,7 +48,20 @@ func (h *Handler) RegisterRoutes(r *mux.Router) {
 	api.HandleFunc("/ip-blocks", h.blockIP).Methods("POST")
 	api.HandleFunc("/ip-blocks/{id}", h.unblockIP).Methods("DELETE")
 
+	api.HandleFunc("/proxy-routes", h.getProxyRoutes).Methods("GET")
+	api.HandleFunc("/proxy-routes", h.createProxyRoute).Methods("POST")
+	api.HandleFunc("/proxy-routes/{id}", h.updateProxyRoute).Methods("PUT")
+	api.HandleFunc("/proxy-routes/{id}", h.deleteProxyRoute).Methods("DELETE")
+
 	r.HandleFunc("/api/ws", h.hub.HandleWS)
+}
+
+func (h *Handler) getMeta(w http.ResponseWriter, r *http.Request) {
+	meta := models.ServerMeta{
+		DefaultBackendURL: h.dynamic.DefaultBackendURL(),
+		WAFScoreThreshold: h.engine.ScoreThreshold(),
+	}
+	respondJSON(w, http.StatusOK, meta)
 }
 
 func (h *Handler) getStats(w http.ResponseWriter, r *http.Request) {
@@ -253,4 +273,121 @@ func validRuleAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+func (h *Handler) getProxyRoutes(w http.ResponseWriter, r *http.Request) {
+	routes, err := h.db.GetProxyRoutes()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Proxy-Routen laden fehlgeschlagen")
+		return
+	}
+	if routes == nil {
+		routes = []models.ProxyRoute{}
+	}
+	respondJSON(w, http.StatusOK, routes)
+}
+
+func (h *Handler) createProxyRoute(w http.ResponseWriter, r *http.Request) {
+	var rt models.ProxyRoute
+	if err := json.NewDecoder(r.Body).Decode(&rt); err != nil {
+		respondError(w, http.StatusBadRequest, "Ungueltiges JSON-Format")
+		return
+	}
+	rt.Host = normalizeRouteHost(rt.Host)
+	if rt.Host == "" {
+		respondError(w, http.StatusBadRequest, "Host ist ein Pflichtfeld")
+		return
+	}
+	if err := validateBackendURL(rt.BackendURL); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.db.CreateProxyRoute(&rt); err != nil {
+		respondError(w, http.StatusInternalServerError, "Proxy-Route speichern fehlgeschlagen (Host evtl. schon vergeben)")
+		return
+	}
+	if err := h.dynamic.ReloadRoutes(); err != nil {
+		log.Printf("Routen neu laden fehlgeschlagen: %v", err)
+	}
+	h.hub.Broadcast(models.WSMessage{Type: "proxy_route_created", Data: rt})
+	respondJSON(w, http.StatusCreated, rt)
+}
+
+func (h *Handler) updateProxyRoute(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(mux.Vars(r)["id"], 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "Ungueltige ID")
+		return
+	}
+	var rt models.ProxyRoute
+	if err := json.NewDecoder(r.Body).Decode(&rt); err != nil {
+		respondError(w, http.StatusBadRequest, "Ungueltiges JSON-Format")
+		return
+	}
+	rt.ID = id
+	rt.Host = normalizeRouteHost(rt.Host)
+	if rt.Host == "" {
+		respondError(w, http.StatusBadRequest, "Host ist ein Pflichtfeld")
+		return
+	}
+	if err := validateBackendURL(rt.BackendURL); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.db.UpdateProxyRoute(&rt); err != nil {
+		respondError(w, http.StatusInternalServerError, "Proxy-Route aktualisieren fehlgeschlagen")
+		return
+	}
+	if err := h.dynamic.ReloadRoutes(); err != nil {
+		log.Printf("Routen neu laden fehlgeschlagen: %v", err)
+	}
+	h.hub.Broadcast(models.WSMessage{Type: "proxy_route_updated", Data: rt})
+	respondJSON(w, http.StatusOK, rt)
+}
+
+func (h *Handler) deleteProxyRoute(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(mux.Vars(r)["id"], 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "Ungueltige ID")
+		return
+	}
+	if err := h.db.DeleteProxyRoute(id); err != nil {
+		respondError(w, http.StatusInternalServerError, "Proxy-Route loeschen fehlgeschlagen")
+		return
+	}
+	if err := h.dynamic.ReloadRoutes(); err != nil {
+		log.Printf("Routen neu laden fehlgeschlagen: %v", err)
+	}
+	h.hub.Broadcast(models.WSMessage{Type: "proxy_route_deleted", Data: map[string]int64{"id": id}})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func normalizeRouteHost(host string) string {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" {
+		return ""
+	}
+	if strings.Contains(h, ":") {
+		if hostPart, _, err := net.SplitHostPort(h); err == nil {
+			return hostPart
+		}
+		if idx := strings.LastIndex(h, ":"); idx > 0 {
+			return h[:idx]
+		}
+	}
+	return h
+}
+
+func validateBackendURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("backend_url muss eine gueltige URL sein")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("backend_url braucht Schema http oder https")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("backend_url braucht einen Host")
+	}
+	return nil
 }

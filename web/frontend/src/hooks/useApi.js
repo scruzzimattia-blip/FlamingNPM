@@ -14,6 +14,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  getMeta: () => request('/meta'),
   getStats: () => request('/stats'),
   getRules: () => request('/rules'),
   createRule: (rule) => request('/rules', { method: 'POST', body: JSON.stringify(rule) }),
@@ -24,4 +25,9 @@ export const api = {
   getBlockedIPs: () => request('/ip-blocks'),
   blockIP: (data) => request('/ip-blocks', { method: 'POST', body: JSON.stringify(data) }),
   unblockIP: (id) => request(`/ip-blocks/${id}`, { method: 'DELETE' }),
+
+  getProxyRoutes: () => request('/proxy-routes'),
+  createProxyRoute: (rt) => request('/proxy-routes', { method: 'POST', body: JSON.stringify(rt) }),
+  updateProxyRoute: (id, rt) => request(`/proxy-routes/${id}`, { method: 'PUT', body: JSON.stringify(rt) }),
+  deleteProxyRoute: (id) => request(`/proxy-routes/${id}`, { method: 'DELETE' }),
 }

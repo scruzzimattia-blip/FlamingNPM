@@ -84,6 +84,19 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_blocked_requests_timestamp ON blocked_requests(timestamp);
 	CREATE INDEX IF NOT EXISTS idx_blocked_requests_source_ip ON blocked_requests(source_ip);
 	CREATE INDEX IF NOT EXISTS idx_ip_blocks_ip ON ip_blocks(ip);
+
+	CREATE TABLE IF NOT EXISTS proxy_routes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		host TEXT NOT NULL UNIQUE,
+		backend_url TEXT NOT NULL,
+		path_prefix TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		priority INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_proxy_routes_enabled_priority ON proxy_routes(enabled, priority DESC);
 	`
 	_, err := db.conn.Exec(schema)
 	return err
@@ -463,4 +476,82 @@ func (db *DB) GetStats() (*models.DashboardStats, error) {
 	}
 
 	return stats, nil
+}
+
+// --- Proxy-Routen (dynamisches Routing) ---
+
+func (db *DB) GetProxyRoutes() ([]models.ProxyRoute, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	rows, err := db.conn.Query(`
+		SELECT id, host, backend_url, path_prefix, enabled, priority, created_at, updated_at
+		FROM proxy_routes ORDER BY priority DESC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanProxyRoutes(rows)
+}
+
+func (db *DB) GetEnabledProxyRoutes() ([]models.ProxyRoute, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	rows, err := db.conn.Query(`
+		SELECT id, host, backend_url, path_prefix, enabled, priority, created_at, updated_at
+		FROM proxy_routes WHERE enabled = 1 ORDER BY priority DESC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanProxyRoutes(rows)
+}
+
+func scanProxyRoutes(rows *sql.Rows) ([]models.ProxyRoute, error) {
+	var routes []models.ProxyRoute
+	for rows.Next() {
+		var rt models.ProxyRoute
+		if err := rows.Scan(&rt.ID, &rt.Host, &rt.BackendURL, &rt.PathPrefix, &rt.Enabled, &rt.Priority, &rt.CreatedAt, &rt.UpdatedAt); err != nil {
+			return nil, err
+		}
+		routes = append(routes, rt)
+	}
+	return routes, nil
+}
+
+func (db *DB) CreateProxyRoute(rt *models.ProxyRoute) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	result, err := db.conn.Exec(
+		`INSERT INTO proxy_routes (host, backend_url, path_prefix, enabled, priority) VALUES (?, ?, ?, ?, ?)`,
+		rt.Host, rt.BackendURL, rt.PathPrefix, rt.Enabled, rt.Priority,
+	)
+	if err != nil {
+		return err
+	}
+	rt.ID, _ = result.LastInsertId()
+	return nil
+}
+
+func (db *DB) UpdateProxyRoute(rt *models.ProxyRoute) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	_, err := db.conn.Exec(
+		`UPDATE proxy_routes SET host=?, backend_url=?, path_prefix=?, enabled=?, priority=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		rt.Host, rt.BackendURL, rt.PathPrefix, rt.Enabled, rt.Priority, rt.ID,
+	)
+	return err
+}
+
+func (db *DB) DeleteProxyRoute(id int64) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	_, err := db.conn.Exec(`DELETE FROM proxy_routes WHERE id=?`, id)
+	return err
 }

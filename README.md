@@ -1,6 +1,11 @@
 # FlamingNPM — Web Application Firewall
 
+[![CI](https://github.com/scruzzimattia-blip/FlamingNPM/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/scruzzimattia-blip/FlamingNPM/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/scruzzimattia-blip/FlamingNPM)](LICENSE)
+
 Eine massgeschneiderte Web Application Firewall (WAF), die als Docker-Container und Reverse Proxy vor dem NGINX Proxy Manager betrieben wird. Inklusive Web-Dashboard zur Verwaltung von Regeln, Live-Logs und IP-Sperren.
+
+**Mitwirken:** siehe [CONTRIBUTING.md](CONTRIBUTING.md) · **Sicherheit:** [SECURITY.md](SECURITY.md) · **Verhaltenskodex:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## Architektur
 
@@ -16,9 +21,9 @@ Internet → [FlamingNPM WAF :8080] → [NGINX Proxy Manager :81] → Backend-Se
 |---|---|---|
 | **Reverse Proxy** | Go (`net/http/httputil`) | Performanter Proxy mit WAF-Middleware |
 | **WAF-Engine** | Go + Regex | Prueft Header, Body, URI und Parameter |
-| **REST-API** | Go + Gorilla Mux | CRUD fuer Regeln, Logs, IP-Sperren |
-| **Dashboard** | React + Vite | Live-Logs, Regelverwaltung, IP-Blocking |
-| **Datenbank** | SQLite (WAL-Modus) | Regeln, Logs, IP-Sperren, Rate-Limiting |
+| **REST-API** | Go + Gorilla Mux | CRUD fuer Regeln, Routen, Logs, IP-Sperren |
+| **Dashboard** | React + Vite | Live-Logs, Regeln, Proxy-Routen, IP-Blocking |
+| **Datenbank** | SQLite (WAL-Modus) | Regeln, `proxy_routes`, Logs, IP-Sperren, Rate-Limiting |
 | **WebSocket** | Gorilla WebSocket | Echtzeit-Updates im Dashboard |
 
 ## Funktionen
@@ -35,8 +40,9 @@ Die WAF wird mit folgenden vordefinierten Regeln ausgeliefert:
 
 ### Dashboard
 
+- **Proxy-Routen**: Host-Header → Backend-URL; optionaler **Pfad-Prefix** wird nur an Segmentgrenzen entfernt (z.B. `/api` bei `/api/foo`, nicht bei `/api1`)
 - **Live-Logs**: Blockierte Anfragen in Echtzeit via WebSocket
-- **Firewall-Regeln**: Erstellen, bearbeiten, aktivieren/deaktivieren von Blacklist- und Whitelist-Regeln zur Laufzeit
+- **Firewall-Regeln**: Score-basiertes Blockieren, Whitelist, Sanitization
 - **IP-Sperren**: Manuelle IP-Sperren (permanent oder zeitlich begrenzt)
 - **Statistiken**: Gesamtzahl Blocks, Blocks heute, aktive Regeln, gesperrte IPs
 
@@ -50,8 +56,8 @@ Automatische temporaere Sperrung bei zu vielen Anfragen pro Zeitfenster. Konfigu
 
 ```bash
 # Repository klonen
-git clone https://github.com/flamingnpm/waf.git
-cd waf
+git clone https://github.com/scruzzimattia-blip/FlamingNPM.git
+cd FlamingNPM
 
 # Starten
 docker compose up -d
@@ -77,6 +83,16 @@ open http://localhost:8443
 
 ```
 FlamingNPM/
+├── .github/
+│   ├── workflows/           # CI (Feature-Branches) und Release (main)
+│   ├── ISSUE_TEMPLATE/      # Bug / Feature (Formulare)
+│   ├── dependabot.yml
+│   └── pull_request_template.md
+├── docs/
+│   └── GITHUB_SETUP.md      # Checkliste: GitHub fuer professionelles Mitwirken
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+├── SECURITY.md
 ├── cmd/waf/
 │   └── main.go              # Einstiegspunkt der Applikation
 ├── internal/
@@ -88,7 +104,8 @@ FlamingNPM/
 │   ├── models/
 │   │   └── models.go        # Datenmodelle
 │   ├── proxy/
-│   │   └── proxy.go         # Reverse Proxy mit WAF-Integration
+│   │   ├── proxy.go         # Ein-Host Reverse Proxy (Legacy-Hilfe)
+│   │   └── dynamic.go       # Dynamisches Routing nach Host + WAF
 │   └── waf/
 │       └── engine.go        # WAF-Engine mit Regex-Matching
 ├── web/frontend/
@@ -113,6 +130,7 @@ FlamingNPM/
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `GET` | `/api/stats` | Dashboard-Statistiken |
+| `GET` | `/api/meta` | Standard-Upstream (`BACKEND_URL`) und `WAF_SCORE_THRESHOLD` |
 | `GET` | `/api/rules` | Alle Firewall-Regeln auflisten |
 | `POST` | `/api/rules` | Neue Regel erstellen |
 | `PUT` | `/api/rules/:id` | Regel aktualisieren |
@@ -122,6 +140,10 @@ FlamingNPM/
 | `GET` | `/api/ip-blocks` | Gesperrte IPs auflisten |
 | `POST` | `/api/ip-blocks` | IP sperren |
 | `DELETE` | `/api/ip-blocks/:id` | IP-Sperre aufheben |
+| `GET` | `/api/proxy-routes` | Alle Proxy-Routen (Host → Backend) |
+| `POST` | `/api/proxy-routes` | Neue Proxy-Route |
+| `PUT` | `/api/proxy-routes/:id` | Proxy-Route aktualisieren |
+| `DELETE` | `/api/proxy-routes/:id` | Proxy-Route loeschen |
 | `WS` | `/api/ws` | WebSocket fuer Live-Updates |
 
 ## Versionierung & CI/CD
@@ -189,6 +211,12 @@ curl -X POST http://localhost:8443/api/rules \
 - `block` — Erhoeht den Bedrohungs-Score um `score_weight` (Standard 10). Block, wenn die Summe die Schwelle `WAF_SCORE_THRESHOLD` erreicht oder uebersteigt.
 - `allow` — Anfrage explizit erlauben (Whitelist, wird vor allen anderen Regeln geprueft)
 - `sanitize` — Entfernt Treffer des Regex im gewaehlten Ziel (Parameter, Body, URI, Header, all), ohne sofort zu blockieren
+
+## Mitwirken
+
+Issues (Vorlagen: Bug / Feature) und Pull Requests gegen den Branch **`develop`** sind willkommen. Ablauf, lokaler Build und CI: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Repository-Einstellungen** (Branch-Schutz, Collaborators, Security): fuer Maintainer dokumentiert in [docs/GITHUB_SETUP.md](docs/GITHUB_SETUP.md).
 
 ## Lizenz
 

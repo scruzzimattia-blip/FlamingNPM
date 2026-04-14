@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Fragen zur Mitwirkung
+    url: https://github.com/scruzzimattia-blip/FlamingNPM/blob/develop/CONTRIBUTING.md
+    about: Aufbau, Branches und PR-Ablauf — bitte zuerst lesen.
