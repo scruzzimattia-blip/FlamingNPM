@@ -126,9 +126,99 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
 
+      - name: Release Notes generieren (alle seit letztem Tag)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          current_tag="${{ steps.version.outputs.version }}"
+
+          # Vorherigen Tag bestimmen (der letzte semver-Tag ungleich current_tag)
+          prev_tag="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v "^${current_tag}$" | head -n1 || true)"
+
+          if [ -n "${prev_tag}" ]; then
+            range="${prev_tag}..HEAD"
+          else
+            range="HEAD"
+          fi
+
+          echo "Release Notes: current=${current_tag} prev=${prev_tag:-<none>} range=${range}"
+
+          # Commits einsammeln
+          mapfile -t commits < <(git log ${range} --pretty=format:'%H%x09%an%x09%s' || true)
+
+          # Contributors (unique, alphabetisch)
+          contributors="$(printf "%s\n" "${commits[@]}" | awk -F'\t' '{print $2}' | sort -u || true)"
+
+          # Aenderungen: bevorzugt PR-Titel, sonst Commit-Subject
+          # Erkennung:
+          # - "Merge pull request #123 from ..."
+          # - "... (#123)" (GitHub squash merge)
+          changes_file="$(mktemp)"
+          pr_seen_file="$(mktemp)"
+
+          extract_pr() {
+            local subject="$1"
+            local pr=""
+
+            if [[ "${subject}" =~ [Mm]erge\ pull\ request\ \#([0-9]+) ]]; then
+              pr="${BASH_REMATCH[1]}"
+            elif [[ "${subject}" =~ \(\#([0-9]+)\)$ ]]; then
+              pr="${BASH_REMATCH[1]}"
+            fi
+
+            echo "${pr}"
+          }
+
+          for line in "${commits[@]}"; do
+            sha="$(echo "${line}" | awk -F'\t' '{print $1}')"
+            author="$(echo "${line}" | awk -F'\t' '{print $2}')"
+            subject="$(echo "${line}" | awk -F'\t' '{print $3}')"
+
+            pr="$(extract_pr "${subject}")"
+            if [ -n "${pr}" ]; then
+              if grep -qx "${pr}" "${pr_seen_file}" 2>/dev/null; then
+                continue
+              fi
+              echo "${pr}" >> "${pr_seen_file}"
+
+              # PR-Titel holen; falls API/Token nicht geht, fallback auf Subject
+              pr_title="$(gh pr view "${pr}" --json title --jq .title 2>/dev/null || true)"
+              if [ -n "${pr_title}" ]; then
+                printf -- "- %s (#%s)\n" "${pr_title}" "${pr}" >> "${changes_file}"
+              else
+                printf -- "- %s (#%s)\n" "${subject}" "${pr}" >> "${changes_file}"
+              fi
+            else
+              printf -- "- %s (by %s, %s)\n" "${subject}" "${author}" "${sha:0:7}" >> "${changes_file}"
+            fi
+          done
+
+          {
+            echo "## Aenderungen"
+            echo
+            if [ -s "${changes_file}" ]; then
+              cat "${changes_file}"
+            else
+              echo "- (Keine Aenderungen gefunden)"
+            fi
+            echo
+            echo "## Contributors"
+            echo
+            if [ -n "${contributors}" ]; then
+              printf "%s\n" "${contributors}" | sed 's/^/- /'
+            else
+              echo "- (Keine Contributors gefunden)"
+            fi
+          } > release_notes.md
+
+          rm -f "${changes_file}" "${pr_seen_file}"
+
       - name: GitHub Release erstellen
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          generate_release_notes: true
+          body_path: release_notes.md
           target_commitish: ${{ github.sha }}
