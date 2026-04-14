@@ -37,10 +37,13 @@ COPY --from=frontend-builder /build/dist /app/web/dist
 
 WORKDIR /app
 
-EXPOSE 8080 8443
+EXPOSE 80 443 8443
 
-ENV BACKEND_URL=http://nginx-proxy-manager:81 \
-    LISTEN_ADDR=:8080 \
+ENV BACKEND_URL= \
+    HTTP_ADDR=:80 \
+    HTTPS_ADDR=:443 \
+    TLS_CERT_FILE= \
+    TLS_KEY_FILE= \
     API_ADDR=:8443 \
     DB_PATH=/data/waf.db \
     MAX_BODY_SIZE=1048576 \

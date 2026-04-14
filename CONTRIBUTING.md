@@ -63,8 +63,12 @@ npm run dev # Vite-Dev-Server, API ggf. per vite.config.js proxy auf :8443
 
 1. Fork erstellen, Feature-Branch von `develop` (`feature/kurze-beschreibung`).
 2. Aenderungen committen (sinnvolle, getrennte Commits willkommen).
-3. Pull Request **gegen `develop`** oeffnen (nicht gegen `main`, ausser Maintainer vereinbart etwas anderes).
+3. Pull Request **immer gegen `develop`** oeffnen (nicht gegen `main`).
 4. CI muss gruen sein; auf Review-Feedback eingehen.
+
+**Maintainer-Flow (Release):**
+
+- **`main` wird nur durch Maintainer aktualisiert.** Wenn dein PR in `develop` gemerged ist, uebernehme ich (Maintainer) den Merge von `develop` nach `main` und starte damit den Release-Prozess.
 
 ## Commit-Nachrichten
 

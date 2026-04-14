@@ -22,7 +22,8 @@ type runtimeRoute struct {
 }
 
 // DynamicRouter waehlt das Backend anhand des Host-Headers (Host-Key ohne Port).
-// Ohne Treffer wird der konfigurierte Standard-Backend verwendet.
+// Ohne Treffer wird der konfigurierte Standard-Backend verwendet (falls gesetzt),
+// sonst wird 404 zurueckgegeben.
 type DynamicRouter struct {
 	engine     *waf.Engine
 	defaultURL *url.URL
@@ -36,9 +37,16 @@ type DynamicRouter struct {
 
 // NewDynamicRouter erstellt den Router und laedt die Routen aus der Datenbank.
 func NewDynamicRouter(defaultBackend string, engine *waf.Engine, db *database.DB) (*DynamicRouter, error) {
-	u, err := url.Parse(defaultBackend)
-	if err != nil {
-		return nil, err
+	var u *url.URL
+	if strings.TrimSpace(defaultBackend) != "" {
+		parsed, err := url.Parse(defaultBackend)
+		if err != nil {
+			return nil, err
+		}
+		if parsed.Scheme == "" || parsed.Host == "" {
+			return nil, &url.Error{Op: "parse", URL: defaultBackend, Err: url.InvalidHostError("default backend muss schema://host enthalten")}
+		}
+		u = parsed
 	}
 
 	dr := &DynamicRouter{
@@ -121,6 +129,12 @@ func (dr *DynamicRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	dr.mu.RUnlock()
 
 	if chosen == nil {
+		if dr.defaultURL == nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("404 Not Found — keine Proxy-Route fuer diesen Host konfiguriert"))
+			return
+		}
 		chosen = dr.defaultURL
 	} else if pathPrefix != "" {
 		r.URL.Path = StripPathPrefixIfMatches(r.URL.Path, pathPrefix)
@@ -170,5 +184,8 @@ func (dr *DynamicRouter) reverseProxyFor(target *url.URL) *httputil.ReverseProxy
 
 // DefaultBackendURL liefert den Standard-Upstream (Umgebungsvariable BACKEND_URL).
 func (dr *DynamicRouter) DefaultBackendURL() string {
+	if dr.defaultURL == nil {
+		return ""
+	}
 	return dr.defaultURL.String()
 }

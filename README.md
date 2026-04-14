@@ -10,7 +10,7 @@ Eine massgeschneiderte Web Application Firewall (WAF), die als Docker-Container 
 ## Architektur
 
 ```
-Internet → [FlamingNPM WAF :8080] → [NGINX Proxy Manager :81] → Backend-Services
+Internet → [FlamingNPM WAF :80/:443] → Backend-Services
                   ↕
           [Dashboard :8443]
 ```
@@ -70,8 +70,11 @@ open http://localhost:8443
 
 | Variable | Standard | Beschreibung |
 |---|---|---|
-| `BACKEND_URL` | `http://nginx-proxy-manager:81` | Ziel-URL fuer weitergeleitete Anfragen |
-| `LISTEN_ADDR` | `:8080` | Adresse des WAF-Proxy |
+| `HTTP_ADDR` | `:80` | Adresse des WAF-Proxy (HTTP) |
+| `HTTPS_ADDR` | `:443` | Adresse des WAF-Proxy (HTTPS) |
+| `TLS_CERT_FILE` | *(leer)* | Pfad zur TLS-Zertifikat-Datei (PEM). Wenn leer: HTTPS-Listener aus. |
+| `TLS_KEY_FILE` | *(leer)* | Pfad zur TLS-Key-Datei (PEM). Wenn leer: HTTPS-Listener aus. |
+| `BACKEND_URL` | *(leer)* | Optionaler Standard-Upstream, wenn keine Host-Route matcht (sonst: 404) |
 | `API_ADDR` | `:8443` | Adresse des Dashboards und der API |
 | `DB_PATH` | `/data/waf.db` | Pfad zur SQLite-Datenbank |
 | `MAX_BODY_SIZE` | `1048576` | Maximale Body-Groesse in Bytes (Standard: 1 MB) |
