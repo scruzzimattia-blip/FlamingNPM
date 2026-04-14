@@ -108,8 +108,9 @@ func (dr *DynamicRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	allowed, ruleName, matched := dr.engine.CheckRequest(r)
 	if !allowed {
-		log.Printf("BLOCKIERT: %s %s von %s — Regel: %s, Match: %s",
-			r.Method, r.URL.Path, extractIP(r), ruleName, truncateLog(matched, 100))
+		_ = matched
+		log.Printf("BLOCKIERT: %s %s von %s — Regel: %s",
+			r.Method, r.URL.Path, extractIP(r), ruleName)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("X-WAF-Block-Reason", ruleName)
 		w.WriteHeader(http.StatusForbidden)
