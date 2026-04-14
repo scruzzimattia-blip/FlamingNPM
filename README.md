@@ -66,6 +66,24 @@ docker compose up -d
 open http://localhost:8443
 ```
 
+### Proxy-Routen anlegen (wie NPM)
+
+Damit der Proxy Requests weiterleitet, musst du mindestens eine Route definieren:
+
+- **Host** (z.B. `app.example.com`)
+- **Backend-URL** (z.B. `http://mein-service:8080`)
+- optional: **Path-Prefix** (z.B. `/api`)
+
+Wenn **keine Host-Route** matcht und **`BACKEND_URL` leer** ist, liefert der Proxy bewusst **404** (kein versehentliches Default-Routing).
+
+### TLS (HTTPS) aktivieren
+
+HTTPS wird aktiviert, sobald `TLS_CERT_FILE` und `TLS_KEY_FILE` gesetzt sind und die Dateien im Container vorhanden sind (PEM):
+
+- Beispiel: `./certs:/certs:ro`
+- `TLS_CERT_FILE=/certs/fullchain.pem`
+- `TLS_KEY_FILE=/certs/privkey.pem`
+
 ### Umgebungsvariablen
 
 | Variable | Standard | Beschreibung |
@@ -170,6 +188,8 @@ Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml): nur b
    - `latest`
    - `main`
    - `git-<sha>`
+
+**Release Notes:** werden aus den Pull Requests seit dem letzten Release-Tag erzeugt (inkl. Contributors).
 
 ### Image abrufen
 

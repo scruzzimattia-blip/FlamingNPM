@@ -27,7 +27,7 @@ Mitwirkende koennen strukturiert helfen — vergleichbar mit Projekten wie Sonar
 Empfohlene Optionen:
 
 | Einstellung | Empfehlung |
-|-------------|------------|
+| --- | --- |
 | **Require a pull request before merging** | Ja (mindestens 1 Genehmigung, wenn du nicht alleine bist). |
 | **Require status checks to pass** | Ja — exakte Job-Namen aus `.github/workflows/ci.yml`: **`Go (fmt, vet, test)`** und **`Frontend (Build)`**. Optional zusaetzlich den Job **„Go-Tests vor Release“** aus `release.yml`, wenn du direkte Pushes auf `main` erlaubst. |
 | **Require branches to be up to date** | Ja, reduziert Integrationsfehler. |
@@ -37,6 +37,17 @@ Empfohlene Optionen:
 **Hinweis:** Externe Beitraege laufen typischerweise gegen **`develop`**.
 Du kannst fuer `develop` **leichtere** Regeln setzen (nur CI, kein Review-Pflicht)
 oder gleiche Regeln — wie du das Team fuehren willst.
+
+## 3a. Default-Branch (empfohlen: `develop`)
+
+Wenn du einen **`develop` → `main`** Release-Flow willst, ist es sinnvoll, **`develop` als Default-Branch** zu setzen:
+
+- GitHub: **Settings → Branches → Default branch** → `develop`
+
+Vorteile:
+
+- Neue Branches/Forks orientieren sich standardmaessig an `develop`.
+- Dependabot kann PRs gegen `develop` erstellen (siehe `target-branch` in `.github/dependabot.yml`).
 
 ## 4. Actions und Packages
 
@@ -49,8 +60,11 @@ oder gleiche Regeln — wie du das Team fuehren willst.
 
 - **Settings → Security → Code security and analysis**
   - **Dependency graph** / **Dependabot alerts** aktivieren (Go- und npm-Abhaengigkeiten).
+  - **Dependabot malware alerts** aktivieren.
+  - **Dependabot security updates** aktivieren (automatische PRs fuer Security-Fixes).
+  - Optional: **Grouped security updates** aktivieren (weniger PR-Spam).
   - **Private vulnerability reporting** aktivieren (siehe [SECURITY.md](../SECURITY.md)).
-- Optional: **Dependabot version updates** (`.github/dependabot.yml`) spaeter ergaenzen.
+- **Dependabot version updates** werden ueber `.github/dependabot.yml` konfiguriert (Intervall, Limit, Ziel-Branch).
 
 ## 6. Community-Profil
 
