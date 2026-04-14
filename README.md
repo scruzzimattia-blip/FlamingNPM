@@ -35,7 +35,7 @@ Die WAF wird mit folgenden vordefinierten Regeln ausgeliefert:
 
 ### Dashboard
 
-- **Proxy-Routen**: Host-Header → Backend-URL (optionaler Pfad-Prefix-Streifen); ohne Treffer gilt `BACKEND_URL`
+- **Proxy-Routen**: Host-Header → Backend-URL; optionaler **Pfad-Prefix** wird nur an Segmentgrenzen entfernt (z.B. `/api` bei `/api/foo`, nicht bei `/api1`)
 - **Live-Logs**: Blockierte Anfragen in Echtzeit via WebSocket
 - **Firewall-Regeln**: Score-basiertes Blockieren, Whitelist, Sanitization
 - **IP-Sperren**: Manuelle IP-Sperren (permanent oder zeitlich begrenzt)
@@ -115,6 +115,7 @@ FlamingNPM/
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `GET` | `/api/stats` | Dashboard-Statistiken |
+| `GET` | `/api/meta` | Standard-Upstream (`BACKEND_URL`) und `WAF_SCORE_THRESHOLD` |
 | `GET` | `/api/rules` | Alle Firewall-Regeln auflisten |
 | `POST` | `/api/rules` | Neue Regel erstellen |
 | `PUT` | `/api/rules/:id` | Regel aktualisieren |
