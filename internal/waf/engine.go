@@ -21,27 +21,36 @@ type compiledRule struct {
 
 // Engine ist die zentrale WAF-Pruefinstanz.
 type Engine struct {
-	db             *database.DB
-	rules          []compiledRule
-	mu             sync.RWMutex
-	maxBodySize    int64
-	rateLimitMax   int
+	db              *database.DB
+	allowRules      []compiledRule
+	sanitizeRules   []compiledRule
+	blockRules      []compiledRule
+	mu              sync.RWMutex
+	maxBodySize     int64
+	rateLimitMax    int
 	rateLimitWindow int
-	onBlock        func(*models.BlockedRequest)
+	scoreThreshold  int
+	onBlock         func(*models.BlockedRequest)
 }
 
 type Config struct {
 	MaxBodySize     int64
 	RateLimitMax    int
 	RateLimitWindow int
+	ScoreThreshold  int // Summe der Regel-Gewichte ab der blockiert wird
 }
 
 func NewEngine(db *database.DB, cfg Config) (*Engine, error) {
+	th := cfg.ScoreThreshold
+	if th <= 0 {
+		th = 50
+	}
 	e := &Engine{
 		db:              db,
 		maxBodySize:     cfg.MaxBodySize,
 		rateLimitMax:    cfg.RateLimitMax,
 		rateLimitWindow: cfg.RateLimitWindow,
+		scoreThreshold:  th,
 	}
 	if err := e.ReloadRules(); err != nil {
 		return nil, err
@@ -54,6 +63,13 @@ func (e *Engine) SetOnBlock(fn func(*models.BlockedRequest)) {
 	e.onBlock = fn
 }
 
+// ScoreThreshold liefert die konfigurierte Schwelle (fuer Tests und Observability).
+func (e *Engine) ScoreThreshold() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.scoreThreshold
+}
+
 // ReloadRules laedt alle aktiven Regeln aus der Datenbank und compiliert die Regex-Patterns.
 func (e *Engine) ReloadRules() error {
 	dbRules, err := e.db.GetEnabledRules()
@@ -61,21 +77,32 @@ func (e *Engine) ReloadRules() error {
 		return fmt.Errorf("regeln laden fehlgeschlagen: %w", err)
 	}
 
-	compiled := make([]compiledRule, 0, len(dbRules))
+	var allow, sanitize, block []compiledRule
 	for _, r := range dbRules {
 		re, err := regexp.Compile(r.Pattern)
 		if err != nil {
 			log.Printf("WARNUNG: Regel '%s' hat ungueltiges Pattern '%s': %v", r.Name, r.Pattern, err)
 			continue
 		}
-		compiled = append(compiled, compiledRule{rule: r, regex: re})
+		cr := compiledRule{rule: r, regex: re}
+		switch r.Action {
+		case "allow":
+			allow = append(allow, cr)
+		case "sanitize":
+			sanitize = append(sanitize, cr)
+		default:
+			block = append(block, cr)
+		}
 	}
 
 	e.mu.Lock()
-	e.rules = compiled
+	e.allowRules = allow
+	e.sanitizeRules = sanitize
+	e.blockRules = block
 	e.mu.Unlock()
 
-	log.Printf("WAF-Engine: %d Regeln geladen", len(compiled))
+	log.Printf("WAF-Engine: %d Allow-, %d Sanitize-, %d Block-Regeln geladen (Schwelle: %d)",
+		len(allow), len(sanitize), len(block), e.scoreThreshold)
 	return nil
 }
 
@@ -103,7 +130,10 @@ func (e *Engine) CheckRequest(r *http.Request) (bool, string, string) {
 	}
 
 	e.mu.RLock()
-	rules := e.rules
+	allowRules := e.allowRules
+	sanitizeRules := e.sanitizeRules
+	blockRules := e.blockRules
+	threshold := e.scoreThreshold
 	e.mu.RUnlock()
 
 	uri := r.URL.RequestURI()
@@ -111,48 +141,152 @@ func (e *Engine) CheckRequest(r *http.Request) (bool, string, string) {
 	headers := flattenHeaders(r.Header)
 
 	var body string
+	bodyRead := false
 	if r.Body != nil && r.ContentLength > 0 && r.ContentLength <= e.maxBodySize {
 		bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, e.maxBodySize))
 		if err == nil {
 			body = string(bodyBytes)
+			bodyRead = true
 			r.Body = io.NopCloser(strings.NewReader(body))
 		}
 	}
 
-	for _, cr := range rules {
-		if cr.rule.Action == "allow" {
-			if matchTarget(cr, uri, queryParams, headers, body) {
-				return true, cr.rule.Name, ""
-			}
-			continue
-		}
-
-		if match := matchTarget(cr, uri, queryParams, headers, body); match {
-			matched := cr.regex.FindString(buildCheckString(cr.rule.Target, uri, queryParams, headers, body))
-
-			blocked := &models.BlockedRequest{
-				SourceIP:    clientIP,
-				Method:      r.Method,
-				Path:        r.URL.Path,
-				RuleName:    cr.rule.Name,
-				MatchedData: truncate(matched, 500),
-				UserAgent:   r.UserAgent(),
-				StatusCode:  403,
-			}
-
-			if err := e.db.LogBlockedRequest(blocked); err != nil {
-				log.Printf("Log-Eintrag schreiben fehlgeschlagen: %v", err)
-			}
-
-			if e.onBlock != nil {
-				e.onBlock(blocked)
-			}
-
-			return false, cr.rule.Name, matched
+	for _, cr := range allowRules {
+		if matchTarget(cr, uri, queryParams, headers, body) {
+			return true, cr.rule.Name, ""
 		}
 	}
 
+	for _, cr := range sanitizeRules {
+		applySanitize(cr, r, &body, &uri, &queryParams, &headers)
+	}
+
+	if bodyRead {
+		r.Body = io.NopCloser(strings.NewReader(body))
+	}
+
+	uri = r.URL.RequestURI()
+	queryParams = r.URL.RawQuery
+	headers = flattenHeaders(r.Header)
+
+	score, ruleNames, matchedSample := accumulateBlockScore(blockRules, uri, queryParams, headers, body)
+	if score >= threshold {
+		detail := fmt.Sprintf("score=%d Schwelle=%d Treffer: %s", score, threshold, strings.Join(ruleNames, ", "))
+		if len(matchedSample) > 200 {
+			matchedSample = matchedSample[:200] + "..."
+		}
+
+		blockedReq := &models.BlockedRequest{
+			SourceIP:    clientIP,
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			RuleName:    "WAF-Threat-Score",
+			MatchedData: detail,
+			UserAgent:   r.UserAgent(),
+			StatusCode:  403,
+		}
+
+		if err := e.db.LogBlockedRequest(blockedReq); err != nil {
+			log.Printf("Log-Eintrag schreiben fehlgeschlagen: %v", err)
+		}
+		if e.onBlock != nil {
+			e.onBlock(blockedReq)
+		}
+		return false, "WAF-Threat-Score", matchedSample
+	}
+
 	return true, "", ""
+}
+
+func accumulateBlockScore(blockRules []compiledRule, uri, params, headers, body string) (score int, names []string, firstMatch string) {
+	for _, cr := range blockRules {
+		if !matchTarget(cr, uri, params, headers, body) {
+			continue
+		}
+		w := cr.rule.ScoreWeight
+		if w <= 0 {
+			w = 10
+		}
+		score += w
+		names = append(names, cr.rule.Name)
+		if firstMatch == "" {
+			firstMatch = cr.regex.FindString(buildCheckString(cr.rule.Target, uri, params, headers, body))
+		}
+	}
+	return score, names, firstMatch
+}
+
+func applySanitize(cr compiledRule, r *http.Request, body, uri, queryParams, headers *string) {
+	switch cr.rule.Target {
+	case "param":
+		q := r.URL.RawQuery
+		if cr.regex.MatchString(q) {
+			r.URL.RawQuery = cr.regex.ReplaceAllString(q, "")
+			*queryParams = r.URL.RawQuery
+		}
+	case "uri":
+		p := r.URL.Path
+		if cr.regex.MatchString(p) {
+			r.URL.Path = cr.regex.ReplaceAllString(p, "")
+		}
+		q := r.URL.RawQuery
+		if cr.regex.MatchString(q) {
+			r.URL.RawQuery = cr.regex.ReplaceAllString(q, "")
+		}
+		*uri = r.URL.RequestURI()
+		*queryParams = r.URL.RawQuery
+	case "body":
+		if body != nil && *body != "" && cr.regex.MatchString(*body) {
+			*body = cr.regex.ReplaceAllString(*body, "")
+		}
+	case "header":
+		clone := r.Header.Clone()
+		for key, vals := range clone {
+			for _, v := range vals {
+				if cr.regex.MatchString(key + ": " + v) {
+					r.Header.Set(key, cr.regex.ReplaceAllString(v, ""))
+				}
+			}
+		}
+		*headers = flattenHeaders(r.Header)
+	case "all":
+		p := r.URL.Path
+		if cr.regex.MatchString(p) {
+			r.URL.Path = cr.regex.ReplaceAllString(p, "")
+		}
+		q := r.URL.RawQuery
+		if cr.regex.MatchString(q) {
+			r.URL.RawQuery = cr.regex.ReplaceAllString(q, "")
+		}
+		if body != nil && *body != "" && cr.regex.MatchString(*body) {
+			*body = cr.regex.ReplaceAllString(*body, "")
+		}
+		hclone := r.Header.Clone()
+		for key, vals := range hclone {
+			for _, v := range vals {
+				if cr.regex.MatchString(key + ": " + v) {
+					r.Header.Set(key, cr.regex.ReplaceAllString(v, ""))
+				}
+			}
+		}
+		*uri = r.URL.RequestURI()
+		*queryParams = r.URL.RawQuery
+		*headers = flattenHeaders(r.Header)
+	default:
+		p := r.URL.Path
+		if cr.regex.MatchString(p) {
+			r.URL.Path = cr.regex.ReplaceAllString(p, "")
+		}
+		q := r.URL.RawQuery
+		if cr.regex.MatchString(q) {
+			r.URL.RawQuery = cr.regex.ReplaceAllString(q, "")
+		}
+		if body != nil && *body != "" && cr.regex.MatchString(*body) {
+			*body = cr.regex.ReplaceAllString(*body, "")
+		}
+		*uri = r.URL.RequestURI()
+		*queryParams = r.URL.RawQuery
+	}
 }
 
 func matchTarget(cr compiledRule, uri, params, headers, body string) bool {
@@ -201,11 +335,4 @@ func extractClientIP(r *http.Request) string {
 		ip = ip[:idx]
 	}
 	return strings.Trim(ip, "[]")
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
 }

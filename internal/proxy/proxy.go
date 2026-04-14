@@ -14,9 +14,9 @@ import (
 
 // ReverseProxy leitet validierte Anfragen an das konfigurierte Backend weiter.
 type ReverseProxy struct {
-	target  *url.URL
-	proxy   *httputil.ReverseProxy
-	engine  *waf.Engine
+	target *url.URL
+	proxy  *httputil.ReverseProxy
+	engine *waf.Engine
 }
 
 func New(targetURL string, engine *waf.Engine) (*ReverseProxy, error) {

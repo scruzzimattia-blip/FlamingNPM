@@ -31,10 +31,12 @@ func main() {
 	maxBodyStr := getEnv("MAX_BODY_SIZE", "1048576")
 	rateLimitMaxStr := getEnv("RATE_LIMIT_MAX", "100")
 	rateLimitWindowStr := getEnv("RATE_LIMIT_WINDOW", "60")
+	scoreThresholdStr := getEnv("WAF_SCORE_THRESHOLD", "50")
 
 	maxBody := parseInt64(maxBodyStr, 1048576)
 	rateLimitMax := parseInt(rateLimitMaxStr, 100)
 	rateLimitWindow := parseInt(rateLimitWindowStr, 60)
+	scoreThreshold := parseInt(scoreThresholdStr, 50)
 
 	db, err := database.New(dbPath)
 	if err != nil {
@@ -47,6 +49,7 @@ func main() {
 		MaxBodySize:     maxBody,
 		RateLimitMax:    rateLimitMax,
 		RateLimitWindow: rateLimitWindow,
+		ScoreThreshold:  scoreThreshold,
 	})
 	if err != nil {
 		log.Fatalf("WAF-Engine initialisieren fehlgeschlagen: %v", err)

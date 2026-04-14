@@ -7,8 +7,9 @@ type FirewallRule struct {
 	ID          int64     `json:"id"`
 	Name        string    `json:"name"`
 	Pattern     string    `json:"pattern"`
-	Target      string    `json:"target"` // "header", "body", "param", "uri", "all"
-	Action      string    `json:"action"` // "block", "allow"
+	Target      string    `json:"target"`       // "header", "body", "param", "uri", "all"
+	Action      string    `json:"action"`       // "block", "allow", "sanitize"
+	ScoreWeight int       `json:"score_weight"` // Gewicht fuer das Bedrohungs-Score (action block)
 	Enabled     bool      `json:"enabled"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -46,11 +47,11 @@ type RateLimitEntry struct {
 
 // DashboardStats liefert Uebersichtszahlen fuers Dashboard.
 type DashboardStats struct {
-	TotalBlocked    int64 `json:"total_blocked"`
-	BlockedToday    int64 `json:"blocked_today"`
-	ActiveRules     int64 `json:"active_rules"`
-	BlockedIPs      int64 `json:"blocked_ips"`
-	RequestsPerMin  int64 `json:"requests_per_min"`
+	TotalBlocked   int64 `json:"total_blocked"`
+	BlockedToday   int64 `json:"blocked_today"`
+	ActiveRules    int64 `json:"active_rules"`
+	BlockedIPs     int64 `json:"blocked_ips"`
+	RequestsPerMin int64 `json:"requests_per_min"`
 }
 
 // WSMessage ist das Format fuer WebSocket-Nachrichten an das Dashboard.
