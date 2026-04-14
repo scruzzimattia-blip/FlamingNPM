@@ -28,7 +28,7 @@ type DynamicRouter struct {
 	defaultURL *url.URL
 	db         *database.DB
 	mu         sync.RWMutex
-	routes     []runtimeRoute
+	hostRoutes map[string]runtimeRoute
 	proxyMu    sync.Mutex
 	proxies    map[string]*httputil.ReverseProxy
 	transport  *http.Transport
@@ -65,29 +65,33 @@ func (dr *DynamicRouter) ReloadRoutes() error {
 		return err
 	}
 
-	out := make([]runtimeRoute, 0, len(dbRoutes))
+	m := make(map[string]runtimeRoute, len(dbRoutes))
 	for _, r := range dbRoutes {
 		t, err := url.Parse(r.BackendURL)
 		if err != nil {
 			log.Printf("WARNUNG: Route '%s' hat ungueltige backend_url: %v", r.Host, err)
 			continue
 		}
-		out = append(out, runtimeRoute{
-			hostLower:  strings.ToLower(strings.TrimSpace(r.Host)),
+		hk := normalizeConfigHost(r.Host)
+		if hk == "" {
+			continue
+		}
+		m[hk] = runtimeRoute{
+			hostLower:  hk,
 			target:     t,
-			pathPrefix: r.PathPrefix,
-		})
+			pathPrefix: strings.TrimSpace(r.PathPrefix),
+		}
 	}
 
 	dr.mu.Lock()
-	dr.routes = out
+	dr.hostRoutes = m
 	dr.mu.Unlock()
 
 	dr.proxyMu.Lock()
 	dr.proxies = make(map[string]*httputil.ReverseProxy)
 	dr.proxyMu.Unlock()
 
-	log.Printf("Dynamisches Routing: %d aktive Host-Regeln geladen", len(out))
+	log.Printf("Dynamisches Routing: %d aktive Host-Regeln geladen", len(m))
 	return nil
 }
 
@@ -110,12 +114,9 @@ func (dr *DynamicRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var pathPrefix string
 
 	dr.mu.RLock()
-	for _, rt := range dr.routes {
-		if rt.hostLower == hostKey {
-			chosen = rt.target
-			pathPrefix = rt.pathPrefix
-			break
-		}
+	if rt, ok := dr.hostRoutes[hostKey]; ok {
+		chosen = rt.target
+		pathPrefix = rt.pathPrefix
 	}
 	dr.mu.RUnlock()
 
