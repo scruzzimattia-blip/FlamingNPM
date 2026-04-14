@@ -65,14 +65,14 @@ func main() {
 		})
 	})
 
-	reverseProxy, err := proxy.New(backendURL, engine)
+	dynamicRouter, err := proxy.NewDynamicRouter(backendURL, engine, db)
 	if err != nil {
-		log.Fatalf("Reverse-Proxy initialisieren fehlgeschlagen: %v", err)
+		log.Fatalf("Dynamischer Reverse-Proxy initialisieren fehlgeschlagen: %v", err)
 	}
-	log.Printf("Reverse-Proxy leitet weiter an: %s", backendURL)
+	log.Printf("Standard-Upstream (ohne Host-Regel): %s", backendURL)
 
 	apiRouter := mux.NewRouter()
-	handler := api.NewHandler(db, engine, hub)
+	handler := api.NewHandler(db, engine, hub, dynamicRouter)
 	handler.RegisterRoutes(apiRouter)
 
 	apiRouter.PathPrefix("/").Handler(http.FileServer(http.Dir("/app/web/dist")))
@@ -86,7 +86,7 @@ func main() {
 
 	proxyServer := &http.Server{
 		Addr:         listenAddr,
-		Handler:      reverseProxy,
+		Handler:      dynamicRouter,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,

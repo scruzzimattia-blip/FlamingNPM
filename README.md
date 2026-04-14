@@ -16,9 +16,9 @@ Internet → [FlamingNPM WAF :8080] → [NGINX Proxy Manager :81] → Backend-Se
 |---|---|---|
 | **Reverse Proxy** | Go (`net/http/httputil`) | Performanter Proxy mit WAF-Middleware |
 | **WAF-Engine** | Go + Regex | Prueft Header, Body, URI und Parameter |
-| **REST-API** | Go + Gorilla Mux | CRUD fuer Regeln, Logs, IP-Sperren |
-| **Dashboard** | React + Vite | Live-Logs, Regelverwaltung, IP-Blocking |
-| **Datenbank** | SQLite (WAL-Modus) | Regeln, Logs, IP-Sperren, Rate-Limiting |
+| **REST-API** | Go + Gorilla Mux | CRUD fuer Regeln, Routen, Logs, IP-Sperren |
+| **Dashboard** | React + Vite | Live-Logs, Regeln, Proxy-Routen, IP-Blocking |
+| **Datenbank** | SQLite (WAL-Modus) | Regeln, `proxy_routes`, Logs, IP-Sperren, Rate-Limiting |
 | **WebSocket** | Gorilla WebSocket | Echtzeit-Updates im Dashboard |
 
 ## Funktionen
@@ -35,8 +35,9 @@ Die WAF wird mit folgenden vordefinierten Regeln ausgeliefert:
 
 ### Dashboard
 
+- **Proxy-Routen**: Host-Header → Backend-URL (optionaler Pfad-Prefix-Streifen); ohne Treffer gilt `BACKEND_URL`
 - **Live-Logs**: Blockierte Anfragen in Echtzeit via WebSocket
-- **Firewall-Regeln**: Erstellen, bearbeiten, aktivieren/deaktivieren von Blacklist- und Whitelist-Regeln zur Laufzeit
+- **Firewall-Regeln**: Score-basiertes Blockieren, Whitelist, Sanitization
 - **IP-Sperren**: Manuelle IP-Sperren (permanent oder zeitlich begrenzt)
 - **Statistiken**: Gesamtzahl Blocks, Blocks heute, aktive Regeln, gesperrte IPs
 
@@ -88,7 +89,8 @@ FlamingNPM/
 │   ├── models/
 │   │   └── models.go        # Datenmodelle
 │   ├── proxy/
-│   │   └── proxy.go         # Reverse Proxy mit WAF-Integration
+│   │   ├── proxy.go         # Ein-Host Reverse Proxy (Legacy-Hilfe)
+│   │   └── dynamic.go       # Dynamisches Routing nach Host + WAF
 │   └── waf/
 │       └── engine.go        # WAF-Engine mit Regex-Matching
 ├── web/frontend/
@@ -122,6 +124,10 @@ FlamingNPM/
 | `GET` | `/api/ip-blocks` | Gesperrte IPs auflisten |
 | `POST` | `/api/ip-blocks` | IP sperren |
 | `DELETE` | `/api/ip-blocks/:id` | IP-Sperre aufheben |
+| `GET` | `/api/proxy-routes` | Alle Proxy-Routen (Host → Backend) |
+| `POST` | `/api/proxy-routes` | Neue Proxy-Route |
+| `PUT` | `/api/proxy-routes/:id` | Proxy-Route aktualisieren |
+| `DELETE` | `/api/proxy-routes/:id` | Proxy-Route loeschen |
 | `WS` | `/api/ws` | WebSocket fuer Live-Updates |
 
 ## Versionierung & CI/CD

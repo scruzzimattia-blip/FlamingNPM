@@ -1,13 +1,15 @@
 import { useState, useCallback } from 'react'
-import { Shield, ScrollText, BookLock, Ban, LayoutDashboard } from 'lucide-react'
+import { ScrollText, BookLock, Ban, LayoutDashboard, Waypoints } from 'lucide-react'
 import { useWebSocket } from './hooks/useWebSocket'
 import Dashboard from './components/Dashboard'
 import LiveLogs from './components/LiveLogs'
 import Rules from './components/Rules'
 import IPBlocking from './components/IPBlocking'
+import ProxyRoutes from './components/ProxyRoutes'
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'routes', label: 'Proxy-Routen', icon: Waypoints },
   { id: 'logs', label: 'Live-Logs', icon: ScrollText },
   { id: 'rules', label: 'Firewall-Regeln', icon: BookLock },
   { id: 'ip-blocks', label: 'IP-Sperren', icon: Ban },
@@ -29,6 +31,8 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
+      case 'routes':
+        return <ProxyRoutes events={wsEvents} />
       case 'logs':
         return <LiveLogs liveLogs={liveLogs} />
       case 'rules':

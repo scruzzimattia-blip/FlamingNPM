@@ -54,6 +54,18 @@ type DashboardStats struct {
 	RequestsPerMin int64 `json:"requests_per_min"`
 }
 
+// ProxyRoute steuert dynamisches Routing nach Hostname (Host-Header).
+type ProxyRoute struct {
+	ID         int64     `json:"id"`
+	Host       string    `json:"host"`        // z.B. app.example.com (ohne Port)
+	BackendURL string    `json:"backend_url"` // z.B. http://backend:3000
+	PathPrefix string    `json:"path_prefix"` // optional, z.B. /api — wird beim Upstream entfernt
+	Enabled    bool      `json:"enabled"`
+	Priority   int       `json:"priority"` // Sortierung in der Verwaltung (hoehere Zuerst); Host ist eindeutig
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 // WSMessage ist das Format fuer WebSocket-Nachrichten an das Dashboard.
 type WSMessage struct {
 	Type string      `json:"type"`
