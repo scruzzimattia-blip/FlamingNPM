@@ -161,21 +161,7 @@ func (dr *DynamicRouter) reverseProxyFor(target *url.URL) *httputil.ReverseProxy
 	orig := p.Director
 	p.Director = func(req *http.Request) {
 		orig(req)
-		clientIP := extractIP(req)
-		if clientIP != "" {
-			req.Header.Set("X-Real-IP", clientIP)
-		}
-		scheme := "http"
-		if req.TLS != nil {
-			scheme = "https"
-		}
-		if forwardedProto := req.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
-			scheme = forwardedProto
-		}
-		req.Header.Set("X-Forwarded-Proto", scheme)
-		if req.Host != "" {
-			req.Header.Set("X-Forwarded-Host", req.Host)
-		}
+		enrichProxyRequestHeaders(req)
 	}
 	p.Transport = dr.transport
 	p.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
