@@ -1,0 +1,29 @@
+services:
+  flamingnpm-waf:
+    build: .
+    container_name: flamingnpm-waf
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # WAF Reverse Proxy
+      - "8443:8443"   # Dashboard & API
+    environment:
+      - BACKEND_URL=http://nginx-proxy-manager:81
+      - LISTEN_ADDR=:8080
+      - API_ADDR=:8443
+      - DB_PATH=/data/waf.db
+      - MAX_BODY_SIZE=1048576
+      - RATE_LIMIT_MAX=100
+      - RATE_LIMIT_WINDOW=60
+      - TZ=Europe/Zurich
+    volumes:
+      - waf-data:/data
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    driver: bridge
+
+volumes:
+  waf-data:
+    driver: local

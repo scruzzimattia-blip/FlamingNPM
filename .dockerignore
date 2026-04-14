@@ -1,0 +1,9 @@
+.git
+.github
+*.md
+LICENSE
+web/frontend/node_modules
+web/frontend/dist
+.env
+.env.*
+data/
