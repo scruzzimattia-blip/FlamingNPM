@@ -34,6 +34,7 @@ func (h *Handler) RegisterRoutes(r *mux.Router) {
 	api := r.PathPrefix("/api").Subrouter()
 
 	api.HandleFunc("/stats", h.getStats).Methods("GET")
+	api.HandleFunc("/meta", h.getMeta).Methods("GET")
 
 	api.HandleFunc("/rules", h.getRules).Methods("GET")
 	api.HandleFunc("/rules", h.createRule).Methods("POST")
@@ -53,6 +54,14 @@ func (h *Handler) RegisterRoutes(r *mux.Router) {
 	api.HandleFunc("/proxy-routes/{id}", h.deleteProxyRoute).Methods("DELETE")
 
 	r.HandleFunc("/api/ws", h.hub.HandleWS)
+}
+
+func (h *Handler) getMeta(w http.ResponseWriter, r *http.Request) {
+	meta := models.ServerMeta{
+		DefaultBackendURL: h.dynamic.DefaultBackendURL(),
+		WAFScoreThreshold: h.engine.ScoreThreshold(),
+	}
+	respondJSON(w, http.StatusOK, meta)
 }
 
 func (h *Handler) getStats(w http.ResponseWriter, r *http.Request) {

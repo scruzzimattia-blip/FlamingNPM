@@ -54,6 +54,12 @@ type DashboardStats struct {
 	RequestsPerMin int64 `json:"requests_per_min"`
 }
 
+// ServerMeta liefert oeffentliche Laufzeit-Konfiguration fuer das Dashboard.
+type ServerMeta struct {
+	DefaultBackendURL string `json:"default_backend_url"`
+	WAFScoreThreshold int    `json:"waf_score_threshold"`
+}
+
 // ProxyRoute steuert dynamisches Routing nach Hostname (Host-Header).
 type ProxyRoute struct {
 	ID         int64     `json:"id"`
