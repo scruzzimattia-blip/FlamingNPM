@@ -51,7 +51,7 @@ export default function Rules({ events }) {
     <>
       <div className="page-header">
         <h2>Firewall-Regeln</h2>
-        <p>Blacklist- und Whitelist-Regeln verwalten</p>
+        <p>Whitelist, Score-basiertes Blockieren und Sanitization</p>
       </div>
 
       <div className="card">
@@ -74,6 +74,7 @@ export default function Rules({ events }) {
                 <th>Name</th>
                 <th>Aktion</th>
                 <th>Ziel</th>
+                <th>Score</th>
                 <th>Pattern</th>
                 <th>Beschreibung</th>
                 <th className="text-right">Aktionen</th>
@@ -82,7 +83,7 @@ export default function Rules({ events }) {
             <tbody>
               {rules.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="empty-state">
+                  <td colSpan="8" className="empty-state">
                     <BookLock size={48} />
                     <p className="mt-1">Keine Regeln konfiguriert.</p>
                   </td>
@@ -102,11 +103,15 @@ export default function Rules({ events }) {
                     </td>
                     <td style={{ fontWeight: 600 }}>{rule.name}</td>
                     <td>
-                      <span className={`badge ${rule.action === 'block' ? 'badge-danger' : 'badge-success'}`}>
-                        {rule.action === 'block' ? 'Blockieren' : 'Erlauben'}
+                      <span className={`badge ${
+                        rule.action === 'block' ? 'badge-danger' :
+                        rule.action === 'sanitize' ? 'badge-warning' : 'badge-success'
+                      }`}>
+                        {rule.action === 'block' ? 'Score / Block' : rule.action === 'sanitize' ? 'Sanitize' : 'Erlauben'}
                       </span>
                     </td>
                     <td><span className="badge badge-accent">{rule.target}</span></td>
+                    <td style={{ fontWeight: 600 }}>{rule.score_weight ?? 10}</td>
                     <td className="mono truncate" style={{ fontSize: '0.75rem' }}>{rule.pattern}</td>
                     <td style={{ color: 'var(--text-secondary)', maxWidth: 200 }}>{rule.description}</td>
                     <td className="text-right">
@@ -145,6 +150,7 @@ function RuleModal({ rule, onClose, onSaved }) {
     pattern: rule?.pattern || '',
     target: rule?.target || 'all',
     action: rule?.action || 'block',
+    score_weight: rule?.score_weight ?? 10,
     enabled: rule?.enabled ?? true,
     description: rule?.description || '',
   })
@@ -231,11 +237,26 @@ function RuleModal({ rule, onClose, onSaved }) {
                 value={form.action}
                 onChange={(e) => update('action', e.target.value)}
               >
-                <option value="block">Blockieren (Blacklist)</option>
+                <option value="block">Score / Block (Gewicht addieren)</option>
                 <option value="allow">Erlauben (Whitelist)</option>
+                <option value="sanitize">Sanitize (Treffer entfernen)</option>
               </select>
             </div>
           </div>
+
+          {form.action === 'block' && (
+            <div className="form-group">
+              <label>Score-Gewicht (bei Treffer)</label>
+              <input
+                type="number"
+                className="form-input"
+                min="1"
+                max="1000"
+                value={form.score_weight}
+                onChange={(e) => update('score_weight', parseInt(e.target.value, 10) || 10)}
+              />
+            </div>
+          )}
 
           <div className="form-group">
             <label>Beschreibung</label>

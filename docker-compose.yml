@@ -1,6 +1,7 @@
 services:
   flamingnpm-waf:
     build: .
+    image: flamingnpm-waf:${APP_VERSION:-v0.0.0}
     container_name: flamingnpm-waf
     restart: unless-stopped
     ports:
@@ -14,6 +15,7 @@ services:
       - MAX_BODY_SIZE=1048576
       - RATE_LIMIT_MAX=100
       - RATE_LIMIT_WINDOW=60
+      - WAF_SCORE_THRESHOLD=50
       - TZ=Europe/Zurich
     volumes:
       - waf-data:/data

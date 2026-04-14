@@ -71,6 +71,7 @@ open http://localhost:8443
 | `MAX_BODY_SIZE` | `1048576` | Maximale Body-Groesse in Bytes (Standard: 1 MB) |
 | `RATE_LIMIT_MAX` | `100` | Max. Anfragen pro Zeitfenster |
 | `RATE_LIMIT_WINDOW` | `60` | Zeitfenster in Sekunden |
+| `WAF_SCORE_THRESHOLD` | `50` | Bedrohungs-Score ab dem blockiert wird (Summe der Regel-Gewichte) |
 
 ## Projektstruktur
 
@@ -100,7 +101,8 @@ FlamingNPM/
 │   ├── package.json
 │   └── vite.config.js
 ├── .github/workflows/
-│   └── dev-deploy.yml       # CI/CD: Build & Push auf develop
+│   ├── ci.yml               # Lint/Tests auf Feature-Branches und PRs
+│   └── release.yml          # Version, Docker-Image und Release nur auf main
 ├── Dockerfile               # Multi-Stage-Build (Node + Go + Alpine)
 ├── docker-compose.yml       # Lokale Entwicklungsumgebung
 └── README.md
@@ -122,20 +124,39 @@ FlamingNPM/
 | `DELETE` | `/api/ip-blocks/:id` | IP-Sperre aufheben |
 | `WS` | `/api/ws` | WebSocket fuer Live-Updates |
 
-## CI/CD
+## Versionierung & CI/CD
 
-Der GitHub-Actions-Workflow (`.github/workflows/dev-deploy.yml`) wird bei jedem Push auf den `develop`-Branch ausgeloest:
+### Feature-Branches und Pull Requests
 
-1. Repository wird ausgecheckt
-2. Docker Buildx wird eingerichtet
-3. Anmeldung an der GitHub Container Registry (ghcr.io)
-4. Multi-Stage Docker-Image wird gebaut
-5. Image wird mit Tags `develop`, `dev-<sha>` und `dev-latest` publiziert
+Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml): bei jedem Push auf einen Branch **ausser** `main` sowie bei **allen** Pull Requests werden ausgefuehrt:
+
+- Go: `gofmt`-Pruefung, `go vet`, `go test` (mit CGO/SQLite)
+- Frontend: `npm install` und Produktions-Build (`vite build`)
+
+### Merge nach `main` (Release)
+
+Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml): nur bei **Push auf `main`** (z. B. nach bestaetigtem Merge eines Pull Requests):
+
+1. Go-Tests
+2. Versionierung: start bei `v0.0.0` (Datei `VERSION`), sonst automatische Patch-Erhoehung
+3. Git-Tag und GitHub Release mit Release Notes
+4. Docker-Image wird publiziert mit Tags:
+   - `vX.Y.Z`
+   - `latest`
+   - `main`
+   - `git-<sha>`
 
 ### Image abrufen
 
 ```bash
-docker pull ghcr.io/flamingnpm/waf:dev-latest
+docker pull ghcr.io/<owner>/<repo>:v0.0.0
+docker pull ghcr.io/<owner>/<repo>:latest
+```
+
+### Lokale Version setzen
+
+```bash
+APP_VERSION=v0.0.0 docker compose up -d
 ```
 
 ## Eigene Regeln erstellen
@@ -165,8 +186,9 @@ curl -X POST http://localhost:8443/api/rules \
 
 ### Regel-Aktionen
 
-- `block` — Anfrage blockieren (Blacklist)
-- `allow` — Anfrage explizit erlauben (Whitelist, wird vor Blacklist-Regeln geprueft)
+- `block` — Erhoeht den Bedrohungs-Score um `score_weight` (Standard 10). Block, wenn die Summe die Schwelle `WAF_SCORE_THRESHOLD` erreicht oder uebersteigt.
+- `allow` — Anfrage explizit erlauben (Whitelist, wird vor allen anderen Regeln geprueft)
+- `sanitize` — Entfernt Treffer des Regex im gewaehlten Ziel (Parameter, Body, URI, Header, all), ohne sofort zu blockieren
 
 ## Lizenz
 

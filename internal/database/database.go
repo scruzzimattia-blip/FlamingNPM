@@ -28,6 +28,9 @@ func New(path string) (*DB, error) {
 	if err := db.migrate(); err != nil {
 		return nil, fmt.Errorf("migration fehlgeschlagen: %w", err)
 	}
+	if err := db.ensureRuleScoreColumn(); err != nil {
+		return nil, fmt.Errorf("schema-aktualisierung fehlgeschlagen: %w", err)
+	}
 	if err := db.seedDefaultRules(); err != nil {
 		return nil, fmt.Errorf("standard-regeln einfuegen fehlgeschlagen: %w", err)
 	}
@@ -86,6 +89,19 @@ func (db *DB) migrate() error {
 	return err
 }
 
+func (db *DB) ensureRuleScoreColumn() error {
+	var n int
+	err := db.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('firewall_rules') WHERE name='score_weight'`).Scan(&n)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err = db.conn.Exec(`ALTER TABLE firewall_rules ADD COLUMN score_weight INTEGER NOT NULL DEFAULT 10`)
+	return err
+}
+
 func (db *DB) seedDefaultRules() error {
 	var count int
 	err := db.conn.QueryRow("SELECT COUNT(*) FROM firewall_rules").Scan(&count)
@@ -102,6 +118,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)(union\s+(all\s+)?select|select\s+.*\s+from|insert\s+into|delete\s+from|drop\s+table|alter\s+table)`,
 			Target:      "all",
 			Action:      "block",
+			ScoreWeight: 25,
 			Enabled:     true,
 			Description: "Erkennt Union-basierte SQL-Injection-Angriffe",
 		},
@@ -110,6 +127,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)(\bor\b\s+\d+\s*=\s*\d+|\band\b\s+\d+\s*=\s*\d+|'\s*(or|and)\s+'[^']*'\s*=\s*'[^']*')`,
 			Target:      "all",
 			Action:      "block",
+			ScoreWeight: 25,
 			Enabled:     true,
 			Description: "Erkennt Boolean-basierte SQL-Injection-Versuche",
 		},
@@ -118,6 +136,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)('\s*--|'\s*#|\bexec\s*\(|;\s*(drop|alter|create|truncate|exec)\b|/\*![\s\S]*?\*/)`,
 			Target:      "param",
 			Action:      "block",
+			ScoreWeight: 25,
 			Enabled:     true,
 			Description: "Erkennt SQL-Kommentar- und Stacked-Query-Angriffe in Parametern",
 		},
@@ -126,6 +145,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)(<script[^>]*>|</script>|javascript\s*:|on(load|error|click|mouseover|submit|focus|blur)\s*=)`,
 			Target:      "all",
 			Action:      "block",
+			ScoreWeight: 25,
 			Enabled:     true,
 			Description: "Erkennt Cross-Site-Scripting ueber Script-Tags und Event-Handler",
 		},
@@ -134,6 +154,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)(data\s*:\s*text/html|&#x?[0-9a-f]+;|%3[Cc]script|<\s*img[^>]+onerror)`,
 			Target:      "all",
 			Action:      "block",
+			ScoreWeight: 25,
 			Enabled:     true,
 			Description: "Erkennt XSS ueber Data-URIs und HTML-Encoding",
 		},
@@ -142,6 +163,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)(\.\./|\.\.\\|%2[Ee]%2[Ee]|%252[Ee]|/etc/passwd|/etc/shadow|/proc/self)`,
 			Target:      "all",
 			Action:      "block",
+			ScoreWeight: 30,
 			Enabled:     true,
 			Description: "Erkennt Verzeichnistraversierungs-Angriffe (Directory Traversal)",
 		},
@@ -150,6 +172,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)(\||;|\$\(|` + "`" + `|&&|\|\|)\s*(cat|ls|whoami|id|uname|curl|wget|nc|bash|sh|python|perl|ruby)`,
 			Target:      "all",
 			Action:      "block",
+			ScoreWeight: 35,
 			Enabled:     true,
 			Description: "Erkennt Betriebssystem-Command-Injection-Versuche",
 		},
@@ -158,6 +181,7 @@ func (db *DB) seedDefaultRules() error {
 			Pattern:     `(?i)\$\{(jndi|lower|upper|env|sys|java):`,
 			Target:      "all",
 			Action:      "block",
+			ScoreWeight: 40,
 			Enabled:     true,
 			Description: "Erkennt Log4Shell (CVE-2021-44228) JNDI-Injection-Versuche",
 		},
@@ -169,14 +193,18 @@ func (db *DB) seedDefaultRules() error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO firewall_rules (name, pattern, target, action, enabled, description) VALUES (?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO firewall_rules (name, pattern, target, action, enabled, description, score_weight) VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, r := range defaults {
-		_, err := stmt.Exec(r.Name, r.Pattern, r.Target, r.Action, r.Enabled, r.Description)
+		sw := r.ScoreWeight
+		if sw <= 0 {
+			sw = 10
+		}
+		_, err := stmt.Exec(r.Name, r.Pattern, r.Target, r.Action, r.Enabled, r.Description, sw)
 		if err != nil {
 			return err
 		}
@@ -190,7 +218,7 @@ func (db *DB) GetRules() ([]models.FirewallRule, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 
-	rows, err := db.conn.Query("SELECT id, name, pattern, target, action, enabled, description, created_at, updated_at FROM firewall_rules ORDER BY id")
+	rows, err := db.conn.Query("SELECT id, name, pattern, target, action, enabled, description, score_weight, created_at, updated_at FROM firewall_rules ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +227,7 @@ func (db *DB) GetRules() ([]models.FirewallRule, error) {
 	var rules []models.FirewallRule
 	for rows.Next() {
 		var r models.FirewallRule
-		if err := rows.Scan(&r.ID, &r.Name, &r.Pattern, &r.Target, &r.Action, &r.Enabled, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Pattern, &r.Target, &r.Action, &r.Enabled, &r.Description, &r.ScoreWeight, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		rules = append(rules, r)
@@ -211,7 +239,7 @@ func (db *DB) GetEnabledRules() ([]models.FirewallRule, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 
-	rows, err := db.conn.Query("SELECT id, name, pattern, target, action, enabled, description, created_at, updated_at FROM firewall_rules WHERE enabled = 1 ORDER BY id")
+	rows, err := db.conn.Query("SELECT id, name, pattern, target, action, enabled, description, score_weight, created_at, updated_at FROM firewall_rules WHERE enabled = 1 ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +248,7 @@ func (db *DB) GetEnabledRules() ([]models.FirewallRule, error) {
 	var rules []models.FirewallRule
 	for rows.Next() {
 		var r models.FirewallRule
-		if err := rows.Scan(&r.ID, &r.Name, &r.Pattern, &r.Target, &r.Action, &r.Enabled, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Pattern, &r.Target, &r.Action, &r.Enabled, &r.Description, &r.ScoreWeight, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		rules = append(rules, r)
@@ -232,9 +260,13 @@ func (db *DB) CreateRule(rule *models.FirewallRule) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
+	sw := rule.ScoreWeight
+	if sw <= 0 {
+		sw = 10
+	}
 	result, err := db.conn.Exec(
-		"INSERT INTO firewall_rules (name, pattern, target, action, enabled, description) VALUES (?, ?, ?, ?, ?, ?)",
-		rule.Name, rule.Pattern, rule.Target, rule.Action, rule.Enabled, rule.Description,
+		"INSERT INTO firewall_rules (name, pattern, target, action, enabled, description, score_weight) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		rule.Name, rule.Pattern, rule.Target, rule.Action, rule.Enabled, rule.Description, sw,
 	)
 	if err != nil {
 		return err
@@ -247,9 +279,13 @@ func (db *DB) UpdateRule(rule *models.FirewallRule) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
+	sw := rule.ScoreWeight
+	if sw <= 0 {
+		sw = 10
+	}
 	_, err := db.conn.Exec(
-		"UPDATE firewall_rules SET name=?, pattern=?, target=?, action=?, enabled=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-		rule.Name, rule.Pattern, rule.Target, rule.Action, rule.Enabled, rule.Description, rule.ID,
+		"UPDATE firewall_rules SET name=?, pattern=?, target=?, action=?, enabled=?, description=?, score_weight=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+		rule.Name, rule.Pattern, rule.Target, rule.Action, rule.Enabled, rule.Description, sw, rule.ID,
 	)
 	return err
 }

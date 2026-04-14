@@ -77,6 +77,15 @@ func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if rule.Action == "" {
+		rule.Action = "block"
+	}
+
+	if !validRuleAction(rule.Action) {
+		respondError(w, http.StatusBadRequest, "Aktion muss block, allow oder sanitize sein")
+		return
+	}
+
 	if err := h.db.CreateRule(&rule); err != nil {
 		respondError(w, http.StatusInternalServerError, "Regel erstellen fehlgeschlagen")
 		return
@@ -103,6 +112,11 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule.ID = id
+
+	if !validRuleAction(rule.Action) {
+		respondError(w, http.StatusBadRequest, "Aktion muss block, allow oder sanitize sein")
+		return
+	}
 
 	if err := h.db.UpdateRule(&rule); err != nil {
 		respondError(w, http.StatusInternalServerError, "Regel aktualisieren fehlgeschlagen")
@@ -230,4 +244,13 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]string{"error": message})
+}
+
+func validRuleAction(action string) bool {
+	switch action {
+	case "block", "allow", "sanitize":
+		return true
+	default:
+		return false
+	}
 }
