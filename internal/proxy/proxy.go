@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -25,6 +26,29 @@ func New(targetURL string, engine *waf.Engine) (*ReverseProxy, error) {
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	originalDirector := proxy.Director
+
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+
+		clientIP := extractIP(req)
+		if clientIP != "" {
+			req.Header.Set("X-Real-IP", clientIP)
+		}
+
+		scheme := "http"
+		if req.TLS != nil {
+			scheme = "https"
+		}
+		if forwardedProto := req.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+			scheme = forwardedProto
+		}
+		req.Header.Set("X-Forwarded-Proto", scheme)
+
+		if req.Host != "" {
+			req.Header.Set("X-Forwarded-Host", req.Host)
+		}
+	}
 
 	proxy.Transport = &http.Transport{
 		MaxIdleConns:        100,
@@ -71,6 +95,15 @@ func extractIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.SplitN(xff, ",", 2)
 		return strings.TrimSpace(parts[0])
+	}
+
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
 	}
 	return r.RemoteAddr
 }
