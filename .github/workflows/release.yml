@@ -146,75 +146,85 @@ jobs:
 
           echo "Release Notes: current=${current_tag} prev=${prev_tag:-<none>} range=${range}"
 
-          # Commits einsammeln
-          mapfile -t commits < <(git log ${range} --pretty=format:'%H%x09%an%x09%s' || true)
+          # PR-basierte Release Notes:
+          # - ermittelt alle Commits seit prev_tag
+          # - mappt Commits -> PRs via GitHub API
+          # - listet unique PR-Titel + PR-Author
+          # - Contributors = unique PR-Authors (nicht Commit-Author vom Merge-Commit)
+          pulls_file="$(mktemp)"
+          commit_fallback_file="$(mktemp)"
 
-          # Contributors (unique, alphabetisch)
-          contributors="$(printf "%s\n" "${commits[@]}" | awk -F'\t' '{print $2}' | sort -u || true)"
+          mapfile -t shas < <(git rev-list ${range} || true)
 
-          # Aenderungen: bevorzugt PR-Titel, sonst Commit-Subject
-          # Erkennung:
-          # - "Merge pull request #123 from ..."
-          # - "... (#123)" (GitHub squash merge)
-          changes_file="$(mktemp)"
-          pr_seen_file="$(mktemp)"
+          for sha in "${shas[@]}"; do
+            # GitHub API: PRs zu einem Commit
+            # Doku: /repos/{owner}/{repo}/commits/{commit_sha}/pulls (benoetigt spezielles Accept)
+            prs_json="$(gh api \
+              -H "Accept: application/vnd.github.groot-preview+json" \
+              "/repos/${GITHUB_REPOSITORY}/commits/${sha}/pulls" 2>/dev/null || true)"
 
-          extract_pr() {
-            local subject="$1"
-            local pr=""
-
-            if [[ "${subject}" =~ [Mm]erge\ pull\ request\ \#([0-9]+) ]]; then
-              pr="${BASH_REMATCH[1]}"
-            elif [[ "${subject}" =~ \(\#([0-9]+)\)$ ]]; then
-              pr="${BASH_REMATCH[1]}"
-            fi
-
-            echo "${pr}"
-          }
-
-          for line in "${commits[@]}"; do
-            sha="$(echo "${line}" | awk -F'\t' '{print $1}')"
-            author="$(echo "${line}" | awk -F'\t' '{print $2}')"
-            subject="$(echo "${line}" | awk -F'\t' '{print $3}')"
-
-            pr="$(extract_pr "${subject}")"
-            if [ -n "${pr}" ]; then
-              if grep -qx "${pr}" "${pr_seen_file}" 2>/dev/null; then
-                continue
-              fi
-              echo "${pr}" >> "${pr_seen_file}"
-
-              # PR-Titel holen; falls API/Token nicht geht, fallback auf Subject
-              pr_title="$(gh pr view "${pr}" --json title --jq .title 2>/dev/null || true)"
-              if [ -n "${pr_title}" ]; then
-                printf -- "- %s (#%s)\n" "${pr_title}" "${pr}" >> "${changes_file}"
-              else
-                printf -- "- %s (#%s)\n" "${subject}" "${pr}" >> "${changes_file}"
-              fi
+            pr_number="$(printf "%s" "${prs_json}" | jq -r '.[0].number // empty' 2>/dev/null || true)"
+            if [ -n "${pr_number}" ]; then
+              echo "${pr_number}" >> "${pulls_file}"
             else
-              printf -- "- %s (by %s, %s)\n" "${subject}" "${author}" "${sha:0:7}" >> "${changes_file}"
+              # Fallback: commit subject aufnehmen (nur falls kein PR gefunden wird)
+              subj="$(git show -s --format=%s "${sha}" 2>/dev/null || true)"
+              auth="$(git show -s --format=%an "${sha}" 2>/dev/null || true)"
+              printf -- "- %s (by %s, %s)\n" "${subj}" "${auth}" "${sha:0:7}" >> "${commit_fallback_file}"
+            fi
+          done
+
+          # Unique PRs
+          mapfile -t pr_numbers < <(sort -u "${pulls_file}" 2>/dev/null || true)
+
+          changes_lines="$(mktemp)"
+          contributors_lines="$(mktemp)"
+
+          for pr in "${pr_numbers[@]}"; do
+            pr_info="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${pr}" --jq '[.title, .user.login] | @tsv' 2>/dev/null || true)"
+            if [ -n "${pr_info}" ]; then
+              title="$(printf "%s" "${pr_info}" | awk -F'\t' '{print $1}')"
+              login="$(printf "%s" "${pr_info}" | awk -F'\t' '{print $2}')"
+              printf -- "- %s (#%s) (@%s)\n" "${title}" "${pr}" "${login}" >> "${changes_lines}"
+              printf "%s\n" "${login}" >> "${contributors_lines}"
+            else
+              printf -- "- PR #%s\n" "${pr}" >> "${changes_lines}"
             fi
           done
 
           {
             echo "## Aenderungen"
             echo
-            if [ -s "${changes_file}" ]; then
-              cat "${changes_file}"
+            if [ -s "${changes_lines}" ]; then
+              cat "${changes_lines}"
+            elif [ -s "${commit_fallback_file}" ]; then
+              cat "${commit_fallback_file}"
             else
               echo "- (Keine Aenderungen gefunden)"
             fi
             echo
             echo "## Contributors"
             echo
-            if [ -n "${contributors}" ]; then
-              printf "%s\n" "${contributors}" | sed 's/^/- /'
+            if [ -s "${contributors_lines}" ]; then
+              sort -u "${contributors_lines}" | sed 's/^/- @/'
             else
-              echo "- (Keine Contributors gefunden)"
+              # Fallback: wenn keine PRs erkannt werden konnten
+              authors="$(git log ${range} --pretty=format:'%an' | sort -u || true)"
+              if [ -n "${authors}" ]; then
+                printf "%s\n" "${authors}" | sed 's/^/- /'
+              else
+                echo "- (Keine Contributors gefunden)"
+              fi
+            fi
+            echo
+            if [ -s "${commit_fallback_file}" ] && [ -s "${changes_lines}" ]; then
+              echo "## Weitere Commits ohne PR-Zuordnung"
+              echo
+              cat "${commit_fallback_file}"
             fi
           } > release_notes.md
 
-          rm -f "${changes_file}" "${pr_seen_file}"
+          rm -f "${pulls_file}" "${changes_lines}" "${contributors_lines}" "${commit_fallback_file}"
 
       - name: GitHub Release erstellen
         uses: softprops/action-gh-release@v2
