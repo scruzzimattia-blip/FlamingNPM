@@ -4,12 +4,17 @@ import { api } from '../hooks/useApi'
 
 export default function ProxyRoutes({ events }) {
   const [routes, setRoutes] = useState([])
+  const [meta, setMeta] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const [editRoute, setEditRoute] = useState(null)
 
   const load = () => api.getProxyRoutes().then(setRoutes).catch(console.error)
+  const loadMeta = () => api.getMeta().then(setMeta).catch(console.error)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    loadMeta()
+  }, [])
 
   useEffect(() => {
     const t = ['proxy_route_created', 'proxy_route_updated', 'proxy_route_deleted']
@@ -39,14 +44,29 @@ export default function ProxyRoutes({ events }) {
     <>
       <div className="page-header">
         <h2>Proxy-Routen</h2>
-        <p>Host-Header zu Backend-URLs zuordnen (Fallback: BACKEND_URL)</p>
+        <p>Host-Header zu Backend-URLs zuordnen; ohne passende Regel gilt der Standard-Upstream.</p>
       </div>
+
+      {meta && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div className="card-body" style={{ display: 'grid', gap: '0.5rem', fontSize: '0.9rem' }}>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>Standard-Upstream (Fallback): </span>
+              <span className="mono">{meta.default_backend_url}</span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>WAF-Score-Schwelle: </span>
+              <span className="mono">{meta.waf_score_threshold}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-header">
           <h3>{routes.length} Eintraege</h3>
           <div className="flex-center">
-            <button type="button" className="btn btn-sm btn-ghost" onClick={load}>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => { load(); loadMeta() }}>
               <RefreshCw size={14} /> Neuladen
             </button>
             <button type="button" className="btn btn-sm btn-primary" onClick={() => { setEditRoute(null); setShowModal(true) }}>
@@ -170,7 +190,7 @@ function RouteModal({ route, onClose, onSaved }) {
             <input className="form-input mono" value={form.backend_url} onChange={(e) => update('backend_url', e.target.value)} placeholder="http://mein-service:8080" />
           </div>
           <div className="form-group">
-            <label>Pfad-Prefix (optional, wird beim Upstream entfernt)</label>
+            <label>Pfad-Prefix (optional, nur an Segmentgrenze, z.B. /api fuer /api/foo)</label>
             <input className="form-input mono" value={form.path_prefix} onChange={(e) => update('path_prefix', e.target.value)} placeholder="/api" />
           </div>
           <div className="form-row">

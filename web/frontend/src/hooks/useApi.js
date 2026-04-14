@@ -14,6 +14,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  getMeta: () => request('/meta'),
   getStats: () => request('/stats'),
   getRules: () => request('/rules'),
   createRule: (rule) => request('/rules', { method: 'POST', body: JSON.stringify(rule) }),
