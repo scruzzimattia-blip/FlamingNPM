@@ -1,4 +1,4 @@
-name: Build & Push (develop)
+name: Release & Deploy (develop)
 
 on:
   push:
@@ -7,20 +7,75 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
-    name: Docker-Image bauen und publizieren
+  release-and-push:
+    name: Versionierung, Release und Docker-Publish
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
       - name: Repository auschecken
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Image-Name normalisieren
+        id: image_name
+        run: echo "value=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Versionsnummer bestimmen
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          while IFS= read -r head_tag; do
+            if [[ "${head_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "version=${head_tag}" >> "$GITHUB_OUTPUT"
+              echo "new_tag=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done < <(git tag --points-at HEAD)
+
+          latest_tag="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+
+          if [ -z "${latest_tag}" ]; then
+            if [ -f VERSION ]; then
+              version_file_value="$(tr -d '\n' < VERSION)"
+              if [[ "${version_file_value}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                next_tag="${version_file_value}"
+              else
+                next_tag="v0.0.0"
+              fi
+            else
+              next_tag="v0.0.0"
+            fi
+          else
+            version_core="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "${version_core}"
+            patch=$((patch + 1))
+            next_tag="v${major}.${minor}.${patch}"
+          fi
+
+          echo "version=${next_tag}" >> "$GITHUB_OUTPUT"
+          echo "new_tag=true" >> "$GITHUB_OUTPUT"
+
+      - name: Git-Tag erstellen
+        if: steps.version.outputs.new_tag == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/${{ steps.version.outputs.version }}`,
+              sha: context.sha
+            })
 
       - name: Docker Buildx einrichten
         uses: docker/setup-buildx-action@v3
@@ -36,11 +91,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.image_name.outputs.value }}
           tags: |
-            type=ref,event=branch
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+            type=raw,value=develop
             type=sha,prefix=dev-
-            type=raw,value=dev-latest
 
       - name: Docker-Image bauen und publizieren
         uses: docker/build-push-action@v6
@@ -52,3 +108,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+
+      - name: GitHub Release erstellen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          target_commitish: ${{ github.sha }}

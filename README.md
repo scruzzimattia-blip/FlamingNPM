@@ -122,20 +122,30 @@ FlamingNPM/
 | `DELETE` | `/api/ip-blocks/:id` | IP-Sperre aufheben |
 | `WS` | `/api/ws` | WebSocket fuer Live-Updates |
 
-## CI/CD
+## Versionierung & CI/CD
 
-Der GitHub-Actions-Workflow (`.github/workflows/dev-deploy.yml`) wird bei jedem Push auf den `develop`-Branch ausgeloest:
+Die Versionierung startet bei `v0.0.0` (Datei `VERSION`) und wird bei jedem Push auf `develop` automatisch weitergefuehrt:
 
-1. Repository wird ausgecheckt
-2. Docker Buildx wird eingerichtet
-3. Anmeldung an der GitHub Container Registry (ghcr.io)
-4. Multi-Stage Docker-Image wird gebaut
-5. Image wird mit Tags `develop`, `dev-<sha>` und `dev-latest` publiziert
+1. Falls noch kein Tag existiert, wird `v0.0.0` erstellt
+2. Sonst wird die Patch-Version automatisch erhoeht (`v0.0.1`, `v0.0.2`, ...)
+3. Pro Version wird automatisch ein GitHub Release erstellt
+4. Das Docker-Image wird mit folgenden Tags publiziert:
+   - `vX.Y.Z` (Release-Tag)
+   - `latest`
+   - `develop`
+   - `dev-<sha>`
 
 ### Image abrufen
 
 ```bash
-docker pull ghcr.io/flamingnpm/waf:dev-latest
+docker pull ghcr.io/<owner>/<repo>:v0.0.0
+docker pull ghcr.io/<owner>/<repo>:latest
+```
+
+### Lokale Version setzen
+
+```bash
+APP_VERSION=v0.0.0 docker compose up -d
 ```
 
 ## Eigene Regeln erstellen

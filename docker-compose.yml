@@ -1,6 +1,7 @@
 services:
   flamingnpm-waf:
     build: .
+    image: flamingnpm-waf:${APP_VERSION:-v0.0.0}
     container_name: flamingnpm-waf
     restart: unless-stopped
     ports:
