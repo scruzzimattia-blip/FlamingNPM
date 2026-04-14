@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Repository auschecken
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Go einrichten
         uses: actions/setup-go@v5
@@ -50,7 +50,7 @@ jobs:
         working-directory: web/frontend
     steps:
       - name: Repository auschecken
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Node einrichten
         uses: actions/setup-node@v4
