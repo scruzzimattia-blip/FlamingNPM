@@ -58,8 +58,8 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	allowed, ruleName, matched := rp.engine.CheckRequest(r)
 
 	if !allowed {
-		log.Printf("BLOCKIERT: %s %s von %s — Regel: %s, Match: %s",
-			r.Method, r.URL.Path, extractIP(r), ruleName, truncateLog(matched, 100))
+		log.Printf("BLOCKIERT: %s %s von %s — Regel: %s, MatchVorhanden: %t, MatchLaenge: %d",
+			r.Method, r.URL.Path, extractIP(r), ruleName, matched != "", len(matched))
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("X-WAF-Block-Reason", ruleName)
