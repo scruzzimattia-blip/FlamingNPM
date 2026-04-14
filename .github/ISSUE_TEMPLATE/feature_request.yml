@@ -1,0 +1,24 @@
+name: Feature Request
+description: Idee oder Verbesserung vorschlagen
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem oder Luecke
+      description: Welches Problem soll geloest werden? Wer profitiert?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Vorschlag
+      description: Wie koennte die Loesung aussehen (ohne Implementierungszwang)?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativen
+      description: Was hast du in Betracht gezogen?

@@ -1,6 +1,11 @@
 # FlamingNPM — Web Application Firewall
 
+[![CI](https://github.com/scruzzimattia-blip/FlamingNPM/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/scruzzimattia-blip/FlamingNPM/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/scruzzimattia-blip/FlamingNPM)](LICENSE)
+
 Eine massgeschneiderte Web Application Firewall (WAF), die als Docker-Container und Reverse Proxy vor dem NGINX Proxy Manager betrieben wird. Inklusive Web-Dashboard zur Verwaltung von Regeln, Live-Logs und IP-Sperren.
+
+**Mitwirken:** siehe [CONTRIBUTING.md](CONTRIBUTING.md) · **Sicherheit:** [SECURITY.md](SECURITY.md) · **Verhaltenskodex:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## Architektur
 
@@ -51,8 +56,8 @@ Automatische temporaere Sperrung bei zu vielen Anfragen pro Zeitfenster. Konfigu
 
 ```bash
 # Repository klonen
-git clone https://github.com/flamingnpm/waf.git
-cd waf
+git clone https://github.com/scruzzimattia-blip/FlamingNPM.git
+cd FlamingNPM
 
 # Starten
 docker compose up -d
@@ -78,6 +83,16 @@ open http://localhost:8443
 
 ```
 FlamingNPM/
+├── .github/
+│   ├── workflows/           # CI (Feature-Branches) und Release (main)
+│   ├── ISSUE_TEMPLATE/      # Bug / Feature (Formulare)
+│   ├── dependabot.yml
+│   └── pull_request_template.md
+├── docs/
+│   └── GITHUB_SETUP.md      # Checkliste: GitHub fuer professionelles Mitwirken
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+├── SECURITY.md
 ├── cmd/waf/
 │   └── main.go              # Einstiegspunkt der Applikation
 ├── internal/
@@ -196,6 +211,12 @@ curl -X POST http://localhost:8443/api/rules \
 - `block` — Erhoeht den Bedrohungs-Score um `score_weight` (Standard 10). Block, wenn die Summe die Schwelle `WAF_SCORE_THRESHOLD` erreicht oder uebersteigt.
 - `allow` — Anfrage explizit erlauben (Whitelist, wird vor allen anderen Regeln geprueft)
 - `sanitize` — Entfernt Treffer des Regex im gewaehlten Ziel (Parameter, Body, URI, Header, all), ohne sofort zu blockieren
+
+## Mitwirken
+
+Issues (Vorlagen: Bug / Feature) und Pull Requests gegen den Branch **`develop`** sind willkommen. Ablauf, lokaler Build und CI: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Repository-Einstellungen** (Branch-Schutz, Collaborators, Security): fuer Maintainer dokumentiert in [docs/GITHUB_SETUP.md](docs/GITHUB_SETUP.md).
 
 ## Lizenz
 
